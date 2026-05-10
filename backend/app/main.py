@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from typing_extensions import Annotated
 
 from app.config import Settings, get_settings
 from app.db import close_pool, get_conn, init_db, open_pool
