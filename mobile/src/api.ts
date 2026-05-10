@@ -34,7 +34,7 @@ export type EventItem = {
 
 type CreateEventPayload = {
   calendar_id: string;
-  created_by: string;
+  created_by: string | null;
   title: string;
   body: string;
   location: string;
@@ -44,7 +44,7 @@ type CreateEventPayload = {
 };
 
 type UpdateEventPayload = {
-  created_by: string;
+  created_by: string | null;
   title: string;
   body: string;
   location: string;

@@ -25,6 +25,7 @@ const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "https://desktop-lnu5
 const api = new ApiClient(apiBaseUrl);
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const placeholderColor = "#94a3b8";
+const allOwnerId = "__all__";
 const savedUserKey = "family-calendar:user";
 const calendarColors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d"];
 const holidays: Record<string, string> = {
@@ -141,7 +142,12 @@ function isHoliday(date: Date) {
 }
 
 function ownerName(members: User[], id: string | null) {
+  if (!id || id === allOwnerId) return "모두";
   return members.find((member) => member.id === id)?.display_name || "알 수 없음";
+}
+
+function faintColor(hex: string) {
+  return /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}1f` : "#e8f3f8";
 }
 
 function nthWeekdayDate(year: number, month: number, weekday: number, weekOfMonth: number) {
@@ -250,7 +256,7 @@ async function writeSavedUser(user: User) {
 function CalendarApp() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
-  const [displayName, setDisplayName] = useState("가족");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [calendarName, setCalendarName] = useState("우리집 달력");
   const [inviteCode, setInviteCode] = useState("");
@@ -372,12 +378,12 @@ function CalendarApp() {
   }
 
   async function createUser() {
-    if (!password.trim()) {
-      Alert.alert("비밀번호 확인", "비밀번호를 입력해 주세요.");
+    if (!displayName.trim() || !password.trim()) {
+      Alert.alert("사용자 확인", "사용자 이름과 비밀번호를 입력해 주세요.");
       return;
     }
     await withLoading(async () => {
-      const user = await api.createUser(displayName.trim() || "가족", password);
+      const user = await api.createUser(displayName.trim(), password);
       await writeSavedUser(user);
       setUserId(user.id);
       setDisplayName(user.display_name);
@@ -528,7 +534,7 @@ function CalendarApp() {
     const rule = event.recurrence_rule;
     setEditingEvent(event);
     setForm({
-      ...blankForm(toDateKey(originalDate), event.created_by || userId, event.calendar_id),
+      ...blankForm(toDateKey(originalDate), event.created_by || allOwnerId, event.calendar_id),
       title: event.title,
       body: event.body,
       location: event.location || "",
@@ -561,7 +567,7 @@ function CalendarApp() {
     }
     await withLoading(async () => {
       const payload = {
-        created_by: form.ownerId,
+        created_by: form.ownerId === allOwnerId ? null : form.ownerId,
         title: form.title.trim(),
         body: form.body.trim(),
         location: form.location.trim(),
@@ -702,7 +708,7 @@ function CalendarApp() {
                   </Text>
                   {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
                   {dayEvents.slice(0, eventLimit).map((event) => (
-                    <Text key={event.occurrenceKey} numberOfLines={1} style={[styles.eventChip, { borderLeftColor: event.color }]}>
+                    <Text key={event.occurrenceKey} numberOfLines={1} ellipsizeMode="clip" style={[styles.eventChip, { backgroundColor: faintColor(event.color), color: event.color }]}>
                       {event.title}
                     </Text>
                   ))}
@@ -888,6 +894,15 @@ function CalendarApp() {
             </Pressable>
             {ownerMenuOpen ? (
               <View style={styles.ownerMenu}>
+                <Pressable
+                  style={[styles.ownerMenuItem, form.ownerId === allOwnerId && styles.ownerMenuItemActive]}
+                  onPress={() => {
+                    setForm((current) => ({ ...current, ownerId: allOwnerId }));
+                    setOwnerMenuOpen(false);
+                  }}
+                >
+                  <Text style={[styles.ownerMenuText, form.ownerId === allOwnerId && styles.ownerMenuTextActive]}>모두</Text>
+                </Pressable>
                 {members.map((member) => (
                   <Pressable
                     key={member.id}
@@ -1109,7 +1124,7 @@ function SetupScreen({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f7faf9", paddingTop: 14 },
-  screen: { flex: 1, paddingHorizontal: 14, paddingBottom: 14, paddingTop: 8, gap: 10 },
+  screen: { flex: 1, paddingHorizontal: 8, paddingBottom: 14, paddingTop: 8, gap: 10 },
   setup: { flex: 1, justifyContent: "center", padding: 22, gap: 12 },
   centerPanel: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 22 },
   topBarOnly: { padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
@@ -1135,7 +1150,7 @@ const styles = StyleSheet.create({
   weekHeader: { flexDirection: "row", backgroundColor: "#f1f5f9", borderBottomWidth: 1, borderBottomColor: "#cbd5e1" },
   weekLabel: { width: "14.2857%", textAlign: "center", paddingVertical: 8, color: "#334155", fontWeight: "700" },
   grid: { flexDirection: "row", flexWrap: "wrap" },
-  dayCell: { width: "14.2857%", height: 76, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 5, gap: 2, backgroundColor: "#fff" },
+  dayCell: { width: "14.2857%", height: 76, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 4, gap: 2, backgroundColor: "#fff" },
   outsideCell: { backgroundColor: "#d8dee7" },
   todayCell: { backgroundColor: "#fef3c7" },
   selectedCell: { borderWidth: 2, borderColor: "#0f766e" },
@@ -1144,7 +1159,7 @@ const styles = StyleSheet.create({
   saturdayText: { color: "#2563eb" },
   holidayName: { color: "#dc2626", fontSize: 9 },
   outsideText: { color: "#475569" },
-  eventChip: { backgroundColor: "#e0f2fe", color: "#075985", borderRadius: 4, paddingHorizontal: 4, borderLeftWidth: 3, fontSize: 10 },
+  eventChip: { borderRadius: 3, paddingHorizontal: 3, fontSize: 9, lineHeight: 12, overflow: "hidden" },
   moreText: { fontSize: 10, color: "#64748b" },
   listHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a" },

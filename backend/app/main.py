@@ -222,7 +222,9 @@ def create_event(
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
     x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
 ):
-    current_user_id = x_user_id or str(payload.created_by)
+    current_user_id = x_user_id or (str(payload.created_by) if payload.created_by else None)
+    if not current_user_id:
+        raise HTTPException(status_code=400, detail="User id is required")
     assert_member(payload.calendar_id, current_user_id)
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
@@ -265,7 +267,9 @@ def update_event(
         ).fetchone()
     if not existing:
         raise HTTPException(status_code=404, detail="Event not found")
-    current_user_id = x_user_id or str(payload.created_by)
+    current_user_id = x_user_id or (str(payload.created_by) if payload.created_by else None)
+    if not current_user_id:
+        raise HTTPException(status_code=400, detail="User id is required")
     assert_member(existing["calendar_id"], current_user_id)
 
     searchable_text = event_embedding_text_from_payload(payload)

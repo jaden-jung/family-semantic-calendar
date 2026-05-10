@@ -41,7 +41,7 @@ class CalendarOut(BaseModel):
 
 class EventCreate(BaseModel):
     calendar_id: UUID
-    created_by: UUID
+    created_by: UUID | None = None
     title: str = Field(min_length=1, max_length=200)
     body: str = ""
     location: str = ""
@@ -56,7 +56,7 @@ class EventUpdate(BaseModel):
     location: str = ""
     starts_at: datetime
     ends_at: datetime | None = None
-    created_by: UUID
+    created_by: UUID | None = None
     recurrence_rule: dict[str, Any] | None = None
 
 
