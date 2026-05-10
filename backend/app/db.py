@@ -53,14 +53,12 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS calendars (
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                 name text NOT NULL,
-                calendar_type text NOT NULL DEFAULT 'schedule' CHECK (calendar_type IN ('schedule', 'ledger')),
                 owner_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 invite_code text NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(6), 'hex'),
                 created_at timestamptz NOT NULL DEFAULT now()
             )
             """
         )
-        conn.execute("ALTER TABLE calendars ADD COLUMN IF NOT EXISTS calendar_type text NOT NULL DEFAULT 'schedule'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS calendar_members (
@@ -84,11 +82,7 @@ def init_db() -> None:
                 starts_at timestamptz NOT NULL,
                 ends_at timestamptz,
                 recurrence_rule jsonb,
-                source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'sms_payment')),
-                merchant text,
-                amount numeric(14, 2),
-                category text,
-                payment_method text,
+                source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual')),
                 raw_text text,
                 embedding vector({dimensions}),
                 created_at timestamptz NOT NULL DEFAULT now(),
@@ -98,21 +92,6 @@ def init_db() -> None:
         )
         conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''")
         conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS recurrence_rule jsonb")
-        conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS payment_method text")
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sms_sender_patterns (
-                id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-                calendar_id uuid NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
-                sender_phone text NOT NULL,
-                sample_message text NOT NULL DEFAULT '',
-                amount_marker text NOT NULL DEFAULT '',
-                merchant_marker text NOT NULL DEFAULT '',
-                datetime_marker text NOT NULL DEFAULT '',
-                created_at timestamptz NOT NULL DEFAULT now()
-            )
-            """
-        )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS events_calendar_starts_at_idx

@@ -17,13 +17,12 @@ import {
   View,
 } from "react-native";
 
-import { ApiClient, Calendar, EventItem, RecurrenceRule, SmsPattern, User } from "./src/api";
+import { ApiClient, Calendar, EventItem, RecurrenceRule, User } from "./src/api";
 
 const api = new ApiClient(process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8000");
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const savedUserKey = "family-calendar:user";
 const calendarColors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d"];
-const expenseCategories = ["식비", "교통", "마트", "생활", "의료", "교육", "문화", "기타"];
 const holidays: Record<string, string> = {
   "01-01": "신정",
   "03-01": "삼일절",
@@ -36,8 +35,6 @@ const holidays: Record<string, string> = {
   "12-25": "성탄절",
 };
 
-type ViewMode = "month" | "week" | "day";
-type CalendarType = "schedule" | "ledger";
 type RepeatType = "daily" | "weekly" | "monthly" | "yearly";
 type MonthMode = "day" | "weekday";
 type DisplayEvent = EventItem & {
@@ -62,10 +59,6 @@ type EventForm = {
   repeatMonthDay: string;
   repeatWeekOfMonth: string;
   repeatLunar: boolean;
-  amount: string;
-  paymentMethod: "card" | "cash";
-  category: string;
-  merchant: string;
 };
 
 function pad(value: number) {
@@ -85,10 +78,6 @@ function addDays(date: Date, amount: number) {
   const next = new Date(date);
   next.setDate(next.getDate() + amount);
   return next;
-}
-
-function addMonths(date: Date, amount: number) {
-  return new Date(date.getFullYear(), date.getMonth() + amount, date.getDate());
 }
 
 function monthLabel(date: Date) {
@@ -260,7 +249,6 @@ export default function App() {
   const [displayName, setDisplayName] = useState("가족");
   const [password, setPassword] = useState("");
   const [calendarName, setCalendarName] = useState("우리집 달력");
-  const [calendarType, setCalendarType] = useState<CalendarType>("schedule");
   const [inviteCode, setInviteCode] = useState("");
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [visibleCalendarIds, setVisibleCalendarIds] = useState<string[]>([]);
@@ -269,12 +257,11 @@ export default function App() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [visibleDate, setVisibleDate] = useState(() => new Date());
   const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
-  const [viewMode, setViewMode] = useState<ViewMode>("month");
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<DisplayEvent[]>([]);
+  const [searchMaxDistance, setSearchMaxDistance] = useState("0.2");
   const [yearMonthOpen, setYearMonthOpen] = useState(false);
   const [yearInput, setYearInput] = useState(String(new Date().getFullYear()));
   const [monthInput, setMonthInput] = useState(String(new Date().getMonth() + 1));
@@ -284,19 +271,10 @@ export default function App() {
   const [repeatOpen, setRepeatOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<DisplayEvent | null>(null);
   const [form, setForm] = useState<EventForm>(blankForm(toDateKey(new Date()), "", ""));
-  const [smsPatterns, setSmsPatterns] = useState<SmsPattern[]>([]);
-  const [smsSenderPhone, setSmsSenderPhone] = useState("");
-  const [smsSampleMessage, setSmsSampleMessage] = useState("");
-  const [smsAmountMarker, setSmsAmountMarker] = useState("");
-  const [smsMerchantMarker, setSmsMerchantMarker] = useState("");
-  const [smsDatetimeMarker, setSmsDatetimeMarker] = useState("");
   const [loading, setLoading] = useState(false);
 
   const selectedCalendar = calendars.find((calendar) => calendar.id === selectedCalendarId);
   const activeCalendars = calendars.filter((calendar) => visibleCalendarIds.includes(calendar.id));
-  const formCalendar = calendars.find((calendar) => calendar.id === form.calendarId);
-  const formIsLedger = formCalendar?.calendar_type === "ledger";
-  const selectedIsLedger = selectedCalendar?.calendar_type === "ledger";
   const rangeStart = addDays(startOfMonthGrid(visibleDate), -35);
   const rangeEnd = addDays(rangeStart, 520);
   const displayEvents = useMemo(() => expandEvents(events, calendars, rangeStart, rangeEnd), [events, calendars, rangeStart.getTime(), rangeEnd.getTime()]);
@@ -312,15 +290,9 @@ export default function App() {
   const todayKey = toDateKey(new Date());
 
   const calendarDays = useMemo(() => {
-    if (viewMode === "day") return [dateFromKey(selectedDateKey)];
-    if (viewMode === "week") {
-      const selected = dateFromKey(selectedDateKey);
-      const weekStart = addDays(selected, -selected.getDay());
-      return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-    }
     const gridStart = startOfMonthGrid(visibleDate);
     return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index));
-  }, [selectedDateKey, viewMode, visibleDate]);
+  }, [visibleDate]);
 
   const swipeResponder = useMemo(
     () =>
@@ -331,7 +303,7 @@ export default function App() {
           if (gesture.dx > 45) movePeriod(-1);
         },
       }),
-    [selectedDateKey, viewMode, visibleDate],
+    [visibleDate],
   );
 
   useEffect(() => {
@@ -349,11 +321,6 @@ export default function App() {
   useEffect(() => {
     if (selectedCalendarId && userId) void refreshMembers(selectedCalendarId);
   }, [selectedCalendarId, userId]);
-
-  useEffect(() => {
-    if (selectedCalendarId && selectedIsLedger && userId) void refreshSmsPatterns(selectedCalendarId);
-    else setSmsPatterns([]);
-  }, [selectedCalendarId, selectedIsLedger, userId]);
 
   function blankForm(dateKey: string, ownerId: string, calendarId: string): EventForm {
     const date = dateFromKey(dateKey);
@@ -373,10 +340,6 @@ export default function App() {
       repeatMonthDay: String(date.getDate()),
       repeatWeekOfMonth: String(Math.ceil(date.getDate() / 7)),
       repeatLunar: false,
-      amount: "",
-      paymentMethod: "card",
-      category: expenseCategories[0],
-      merchant: "",
     };
   }
 
@@ -442,7 +405,7 @@ export default function App() {
       return;
     }
     await withLoading(async () => {
-      const calendar = await api.createCalendar(name, userId, calendarType);
+      const calendar = await api.createCalendar(name, userId);
       setCalendars((current) => [calendar, ...current]);
       setSelectedCalendarId(calendar.id);
       setVisibleCalendarIds((current) => [calendar.id, ...current]);
@@ -479,41 +442,6 @@ export default function App() {
     setEvents(groups.flat());
   }
 
-  async function refreshSmsPatterns(calendarId: string) {
-    const items = await api.listSmsPatterns(calendarId, userId);
-    setSmsPatterns(items);
-  }
-
-  async function createSmsPattern() {
-    if (!selectedCalendarId || !smsSenderPhone.trim()) return;
-    await withLoading(async () => {
-      await api.createSmsPattern(
-        {
-          calendar_id: selectedCalendarId,
-          sender_phone: smsSenderPhone.trim(),
-          sample_message: smsSampleMessage.trim(),
-          amount_marker: smsAmountMarker.trim(),
-          merchant_marker: smsMerchantMarker.trim(),
-          datetime_marker: smsDatetimeMarker.trim(),
-        },
-        userId,
-      );
-      setSmsSenderPhone("");
-      setSmsSampleMessage("");
-      setSmsAmountMarker("");
-      setSmsMerchantMarker("");
-      setSmsDatetimeMarker("");
-      await refreshSmsPatterns(selectedCalendarId);
-    });
-  }
-
-  async function deleteSmsPattern(patternId: string) {
-    await withLoading(async () => {
-      await api.deleteSmsPattern(patternId, userId);
-      await refreshSmsPatterns(selectedCalendarId);
-    });
-  }
-
   function displayFromEvent(event: EventItem): DisplayEvent {
     const calendarIndex = calendars.findIndex((calendar) => calendar.id === event.calendar_id);
     const calendar = calendars.find((item) => item.id === event.calendar_id);
@@ -534,9 +462,14 @@ export default function App() {
       Alert.alert("검색어 확인", "검색어를 입력해 주세요.");
       return;
     }
+    const maxDistance = Number(searchMaxDistance);
+    if (Number.isNaN(maxDistance) || maxDistance < 0 || maxDistance > 2) {
+      Alert.alert("임계치 확인", "검색 임계치는 0~2 사이 숫자로 입력해 주세요. 낮을수록 더 엄격합니다.");
+      return;
+    }
     if (!visibleCalendarIds.length) return;
     await withLoading(async () => {
-      const groups = await Promise.all(visibleCalendarIds.map((calendarId) => api.searchEvents(calendarId, query, userId)));
+      const groups = await Promise.all(visibleCalendarIds.map((calendarId) => api.searchEvents(calendarId, query, userId, maxDistance)));
       const unique = new Map<string, EventItem>();
       groups.flat().forEach((event) => unique.set(event.id, event));
       setSearchResults(Array.from(unique.values()).map(displayFromEvent));
@@ -571,19 +504,11 @@ export default function App() {
   }
 
   function movePeriod(direction: number) {
-    if (viewMode === "day") {
-      const next = addDays(dateFromKey(selectedDateKey), direction);
+    setVisibleDate((current) => {
+      const next = new Date(current.getFullYear(), current.getMonth() + direction, 1);
       setSelectedDateKey(toDateKey(next));
-      setVisibleDate(new Date(next.getFullYear(), next.getMonth(), 1));
-      return;
-    }
-    if (viewMode === "week") {
-      const next = addDays(dateFromKey(selectedDateKey), direction * 7);
-      setSelectedDateKey(toDateKey(next));
-      setVisibleDate(new Date(next.getFullYear(), next.getMonth(), 1));
-      return;
-    }
-    setVisibleDate((current) => new Date(current.getFullYear(), current.getMonth() + direction, 1));
+      return next;
+    });
   }
 
   function openCreateForm(dateKey = selectedDateKey) {
@@ -614,10 +539,6 @@ export default function App() {
       repeatMonthDay: String(rule?.monthDay || originalDate.getDate()),
       repeatWeekOfMonth: String(rule?.weekOfMonth || Math.ceil(originalDate.getDate() / 7)),
       repeatLunar: Boolean(rule?.lunar),
-      amount: event.amount || "",
-      paymentMethod: event.payment_method === "cash" ? "cash" : "card",
-      category: event.category || expenseCategories[0],
-      merchant: event.merchant || "",
     });
     setOwnerMenuOpen(false);
     setCalendarMenuOpen(false);
@@ -632,13 +553,6 @@ export default function App() {
       return;
     }
     const normalizedTime = normalizeTime(form.time);
-    const selectedFormCalendar = calendars.find((calendar) => calendar.id === form.calendarId);
-    const isLedger = selectedFormCalendar?.calendar_type === "ledger";
-    const amount = form.amount.replace(/,/g, "").trim();
-    if (isLedger && amount && Number.isNaN(Number(amount))) {
-      Alert.alert("금액 확인", "금액은 숫자로 입력해 주세요.");
-      return;
-    }
     if (!form.calendarId || !form.title.trim() || !form.ownerId) {
       Alert.alert("입력 확인", "달력, 제목, 사용자 선택은 필수입니다.");
       return;
@@ -652,10 +566,6 @@ export default function App() {
         starts_at: startsAt,
         ends_at: normalizedTime ? startsAt : null,
         recurrence_rule: buildRule(form),
-        merchant: isLedger ? form.merchant.trim() || form.title.trim() : null,
-        amount: isLedger && amount ? amount : null,
-        category: isLedger ? form.category : null,
-        payment_method: isLedger ? form.paymentMethod : null,
       };
       if (editingEvent) await api.updateEvent(editingEvent.id, payload, userId);
       else await api.createEvent({ calendar_id: form.calendarId, ...payload });
@@ -690,12 +600,6 @@ export default function App() {
       if (current.includes(calendarId)) return current.filter((id) => id !== calendarId);
       return [...current, calendarId];
     });
-  }
-
-  function modeLabel(mode: ViewMode) {
-    if (mode === "month") return "월";
-    if (mode === "week") return "주";
-    return "일";
   }
 
   function copyInviteCode(code: string) {
@@ -736,7 +640,7 @@ export default function App() {
         <View style={styles.topBar}>
           <View>
             <Text style={styles.activeCalendarTitle}>{activeCalendars.map((calendar) => calendar.name).join(", ")}</Text>
-            <Text style={styles.muted}>{activeCalendars.length > 1 ? `${activeCalendars.length}개 달력 표시 중` : selectedIsLedger ? "가계부용 달력" : "일정관리용 달력"}</Text>
+            <Text style={styles.muted}>{activeCalendars.length > 1 ? `${activeCalendars.length}개 달력 표시 중` : "일정 달력"}</Text>
           </View>
           <View style={styles.topActions}>
             <Pressable style={styles.navButton} onPress={() => setSearchOpen(true)}>
@@ -753,28 +657,22 @@ export default function App() {
             <Feather name="chevron-left" size={22} color="#0f172a" />
           </Pressable>
           <Pressable style={styles.monthTitleButton} onPress={openYearMonthPicker}>
-            <Text style={styles.monthTitle}>{viewMode === "month" ? monthLabel(visibleDate) : selectedDateKey}</Text>
+            <Text style={styles.monthTitle}>{monthLabel(visibleDate)}</Text>
           </Pressable>
           <Pressable style={styles.navButton} onPress={() => movePeriod(1)}>
             <Feather name="chevron-right" size={22} color="#0f172a" />
           </Pressable>
-          <Pressable style={styles.comboButton} onPress={() => setModeMenuOpen(true)}>
-            <Text style={styles.comboText}>{modeLabel(viewMode)}</Text>
-            <Feather name="chevron-down" size={16} color="#0f172a" />
-          </Pressable>
         </View>
 
         <View style={styles.calendarWrap} {...swipeResponder.panHandlers}>
-          {viewMode !== "day" ? (
-            <View style={styles.weekHeader}>
-              {dayLabels.map((label, index) => (
-                <Text key={label} style={[styles.weekLabel, index === 0 && styles.holidayText]}>
-                  {label}
-                </Text>
-              ))}
-            </View>
-          ) : null}
-          <View style={[styles.grid, viewMode === "week" && styles.weekGrid, viewMode === "day" && styles.dayGrid]}>
+          <View style={styles.weekHeader}>
+            {dayLabels.map((label, index) => (
+              <Text key={label} style={[styles.weekLabel, index === 0 && styles.holidayText]}>
+                {label}
+              </Text>
+            ))}
+          </View>
+          <View style={styles.grid}>
             {calendarDays.map((date) => {
               const key = toDateKey(date);
               const dayEvents = eventsByDate.get(key) || [];
@@ -782,15 +680,13 @@ export default function App() {
               const isCurrentMonth = date.getMonth() === visibleDate.getMonth();
               const isSelected = key === selectedDateKey;
               const isToday = key === toDateKey(new Date());
-              const eventLimit = viewMode === "day" ? 50 : viewMode === "week" ? 8 : 2;
+              const eventLimit = 2;
               return (
                 <Pressable
                   key={key}
                   style={[
                     styles.dayCell,
-                    viewMode === "week" && styles.weekCell,
-                    viewMode === "day" && styles.singleDayCell,
-                    !isCurrentMonth && viewMode === "month" && styles.outsideCell,
+                    !isCurrentMonth && styles.outsideCell,
                     isToday && styles.todayCell,
                     isSelected && styles.selectedCell,
                   ]}
@@ -799,13 +695,13 @@ export default function App() {
                     setVisibleDate(new Date(date.getFullYear(), date.getMonth(), 1));
                   }}
                 >
-                  <Text style={[styles.dayNumber, isHoliday(date) && styles.holidayText, !isCurrentMonth && viewMode === "month" && styles.outsideText]}>
-                    {viewMode === "day" ? `${key} ${dayLabels[date.getDay()]}` : date.getDate()}
+                  <Text style={[styles.dayNumber, isHoliday(date) && styles.holidayText, !isCurrentMonth && styles.outsideText]}>
+                    {date.getDate()}
                   </Text>
                   {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
                   {dayEvents.slice(0, eventLimit).map((event) => (
-                    <Text key={event.occurrenceKey} numberOfLines={viewMode === "day" ? 2 : 1} style={[styles.eventChip, { borderLeftColor: event.color }, viewMode === "day" && styles.dayEventChip]}>
-                      {viewMode === "day" ? `${timeFromIso(event.starts_at)} ${event.title} ${event.location ? `· ${event.location}` : ""}` : event.title}
+                    <Text key={event.occurrenceKey} numberOfLines={1} style={[styles.eventChip, { borderLeftColor: event.color }]}>
+                      {event.title}
                     </Text>
                   ))}
                   {dayEvents.length > eventLimit ? <Text style={styles.moreText}>+{dayEvents.length - eventLimit}</Text> : null}
@@ -830,8 +726,6 @@ export default function App() {
               <Text style={styles.muted}>
                 {timeFromIso(event.starts_at)} · {event.calendarName} · {ownerName(members, event.created_by)}
                 {event.location ? ` · ${event.location}` : ""}
-                {event.amount ? ` · ${Number(event.amount).toLocaleString()}원` : ""}
-                {event.category ? ` · ${event.category}` : ""}
                 {event.recurrence_rule ? " · 반복" : ""}
               </Text>
               {event.body ? <Text style={styles.eventBody}>{event.body}</Text> : null}
@@ -840,7 +734,6 @@ export default function App() {
         </ScrollView>
       </View>
 
-      {renderModeMenu()}
       {renderSearchModal()}
       {renderYearMonthModal()}
       {renderEventModal()}
@@ -848,29 +741,6 @@ export default function App() {
       {loading ? <LoadingOverlay /> : null}
     </SafeAreaView>
   );
-
-  function renderModeMenu() {
-    return (
-      <Modal visible={modeMenuOpen} transparent animationType="fade">
-        <Pressable style={styles.menuBackdrop} onPress={() => setModeMenuOpen(false)}>
-          <View style={styles.menuPanel}>
-            {(["month", "week", "day"] as ViewMode[]).map((mode) => (
-              <Pressable
-                key={mode}
-                style={[styles.menuItem, viewMode === mode && styles.menuItemActive]}
-                onPress={() => {
-                  setViewMode(mode);
-                  setModeMenuOpen(false);
-                }}
-              >
-                <Text style={[styles.menuItemText, viewMode === mode && styles.menuItemTextActive]}>{modeLabel(mode)} 보기</Text>
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
-    );
-  }
 
   function renderSearchModal() {
     return (
@@ -909,6 +779,7 @@ export default function App() {
                   </Pressable>
                 ))}
               </ScrollView>
+              <Text style={styles.muted}>검색 결과가 너무 많으면 설정에서 임계치를 낮춰 보세요.</Text>
             </View>
           </View>
         </View>
@@ -988,27 +859,6 @@ export default function App() {
               style={styles.input}
             />
             <TextInput value={form.title} onChangeText={(title) => setForm((current) => ({ ...current, title }))} placeholder="제목" style={styles.input} />
-            {formIsLedger ? (
-              <View style={styles.repeatBox}>
-                <Text style={styles.fieldLabel}>가계부 내역</Text>
-                <TextInput value={form.amount} onChangeText={(amount) => setForm((current) => ({ ...current, amount }))} placeholder="금액" keyboardType="number-pad" style={styles.input} />
-                <TextInput value={form.merchant} onChangeText={(merchant) => setForm((current) => ({ ...current, merchant }))} placeholder="사용처" style={styles.input} />
-                <View style={styles.pillRow}>
-                  {(["card", "cash"] as const).map((method) => (
-                    <Pressable key={method} style={[styles.modePill, form.paymentMethod === method && styles.modePillActive]} onPress={() => setForm((current) => ({ ...current, paymentMethod: method }))}>
-                      <Text style={[styles.modePillText, form.paymentMethod === method && styles.modePillTextActive]}>{method === "card" ? "카드" : "현금"}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-                <View style={styles.pillRow}>
-                  {expenseCategories.map((category) => (
-                    <Pressable key={category} style={[styles.modePill, form.category === category && styles.modePillActive]} onPress={() => setForm((current) => ({ ...current, category }))}>
-                      <Text style={[styles.modePillText, form.category === category && styles.modePillTextActive]}>{category}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ) : null}
             <TextInput value={form.body} onChangeText={(body) => setForm((current) => ({ ...current, body }))} placeholder="설명" style={[styles.input, styles.textArea]} multiline />
             <TextInput value={form.location} onChangeText={(location) => setForm((current) => ({ ...current, location }))} placeholder="장소" style={styles.input} />
             <Text style={styles.fieldLabel}>누구의 일정인가요?</Text>
@@ -1134,7 +984,6 @@ export default function App() {
                 <Pressable style={styles.calendarLine} onPress={() => toggleVisibleCalendar(calendar.id)}>
                   <Feather name={visibleCalendarIds.includes(calendar.id) ? "check-square" : "square"} size={20} color={calendarColors[index % calendarColors.length]} />
                   <Text style={styles.eventTitle}>{calendar.name}</Text>
-                  <Text style={styles.typeBadge}>{calendar.calendar_type === "ledger" ? "가계부" : "일정"}</Text>
                 </Pressable>
                 <Pressable onLongPress={() => copyInviteCode(calendar.invite_code)}>
                   <Text style={styles.muted}>초대 코드 {calendar.invite_code} · 길게 눌러 복사</Text>
@@ -1146,14 +995,10 @@ export default function App() {
                 </Pressable>
               </View>
             ))}
+            <Text style={styles.fieldLabel}>검색 임계치</Text>
+            <TextInput value={searchMaxDistance} onChangeText={setSearchMaxDistance} placeholder="0.2" keyboardType="decimal-pad" style={styles.input} />
+            <Text style={styles.muted}>낮을수록 더 비슷한 일정만 나옵니다. 로컬 임베딩은 보통 0.1~0.3 사이에서 조정하면 됩니다.</Text>
             <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="새 달력 이름" style={styles.input} />
-            <View style={styles.pillRow}>
-              {(["schedule", "ledger"] as CalendarType[]).map((type) => (
-                <Pressable key={type} style={[styles.modePill, calendarType === type && styles.modePillActive]} onPress={() => setCalendarType(type)}>
-                  <Text style={[styles.modePillText, calendarType === type && styles.modePillTextActive]}>{type === "schedule" ? "일정관리용" : "가계부용"}</Text>
-                </Pressable>
-              ))}
-            </View>
             <Pressable style={styles.primaryButton} onPress={createCalendar}>
               <Feather name="plus" size={18} color="#fff" />
               <Text style={styles.primaryButtonText}>달력 만들기</Text>
@@ -1163,7 +1008,6 @@ export default function App() {
               <Feather name="users" size={18} color="#0f172a" />
               <Text style={styles.secondaryButtonText}>초대 코드로 참여</Text>
             </Pressable>
-            {selectedIsLedger ? renderSmsPatternSettings() : null}
             <View style={styles.preferencePreview}>
               <Text style={styles.fieldLabel}>개인화 설정 예정</Text>
               <Text style={styles.muted}>글자 크기, 색상, 시작 요일, 공휴일 기준 국가를 이곳에서 설정할 예정입니다.</Text>
@@ -1171,35 +1015,6 @@ export default function App() {
           </ScrollView>
         </View>
       </Modal>
-    );
-  }
-
-  function renderSmsPatternSettings() {
-    return (
-      <View style={styles.preferencePreview}>
-        <Text style={styles.sectionTitle}>카드 SMS 자동등록 설정</Text>
-        {smsPatterns.map((pattern) => (
-          <View key={pattern.id} style={styles.smsPatternRow}>
-            <View style={styles.flexInput}>
-              <Text style={styles.eventTitle}>{pattern.sender_phone}</Text>
-              <Text numberOfLines={2} style={styles.muted}>{pattern.sample_message}</Text>
-              <Text style={styles.muted}>금액: {pattern.amount_marker || "-"} · 사용처: {pattern.merchant_marker || "-"} · 시각: {pattern.datetime_marker || "-"}</Text>
-            </View>
-            <Pressable style={styles.navButton} onPress={() => deleteSmsPattern(pattern.id)}>
-              <Feather name="trash-2" size={18} color="#b91c1c" />
-            </Pressable>
-          </View>
-        ))}
-        <TextInput value={smsSenderPhone} onChangeText={setSmsSenderPhone} placeholder="발신 전화번호 예: 1588-0000" style={styles.input} />
-        <TextInput value={smsSampleMessage} onChangeText={setSmsSampleMessage} placeholder="카드사 SMS 샘플 메시지 복붙" style={[styles.input, styles.textArea]} multiline />
-        <TextInput value={smsAmountMarker} onChangeText={setSmsAmountMarker} placeholder="금액으로 인식할 부분 예: 12,300원" style={styles.input} />
-        <TextInput value={smsMerchantMarker} onChangeText={setSmsMerchantMarker} placeholder="사용처로 인식할 부분 예: 스타벅스" style={styles.input} />
-        <TextInput value={smsDatetimeMarker} onChangeText={setSmsDatetimeMarker} placeholder="결제시각으로 인식할 부분 예: 05/10 15:32" style={styles.input} />
-        <Pressable style={styles.secondaryButton} onPress={createSmsPattern}>
-          <Feather name="message-square" size={18} color="#0f172a" />
-          <Text style={styles.secondaryButtonText}>SMS 패턴 등록</Text>
-        </Pressable>
-      </View>
     );
   }
 }
@@ -1287,17 +1102,11 @@ const styles = StyleSheet.create({
   monthTitleButton: { flex: 1, minHeight: 36, alignItems: "center", justifyContent: "center" },
   monthTitle: { textAlign: "center", fontSize: 18, fontWeight: "700", color: "#0f172a" },
   navButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#e2e8f0" },
-  comboButton: { minHeight: 36, minWidth: 62, borderRadius: 6, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
-  comboText: { color: "#0f172a", fontWeight: "700" },
   calendarWrap: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, overflow: "hidden" },
   weekHeader: { flexDirection: "row", backgroundColor: "#f1f5f9", borderBottomWidth: 1, borderBottomColor: "#cbd5e1" },
   weekLabel: { width: "14.2857%", textAlign: "center", paddingVertical: 8, color: "#334155", fontWeight: "700" },
   grid: { flexDirection: "row", flexWrap: "wrap" },
-  weekGrid: { minHeight: 168 },
-  dayGrid: { minHeight: 260 },
   dayCell: { width: "14.2857%", height: 76, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 5, gap: 2, backgroundColor: "#fff" },
-  weekCell: { height: 168 },
-  singleDayCell: { width: "100%", height: 260 },
   outsideCell: { backgroundColor: "#d8dee7" },
   todayCell: { backgroundColor: "#fef3c7" },
   selectedCell: { borderWidth: 2, borderColor: "#0f766e" },
@@ -1306,7 +1115,6 @@ const styles = StyleSheet.create({
   holidayName: { color: "#dc2626", fontSize: 9 },
   outsideText: { color: "#475569" },
   eventChip: { backgroundColor: "#e0f2fe", color: "#075985", borderRadius: 4, paddingHorizontal: 4, borderLeftWidth: 3, fontSize: 10 },
-  dayEventChip: { fontSize: 13, paddingVertical: 5 },
   moreText: { fontSize: 10, color: "#64748b" },
   listHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a" },
@@ -1346,17 +1154,9 @@ const styles = StyleSheet.create({
   modePillActive: { backgroundColor: "#0f766e", borderColor: "#0f766e" },
   modePillText: { color: "#334155", fontWeight: "700" },
   modePillTextActive: { color: "#fff" },
-  menuBackdrop: { flex: 1, alignItems: "flex-end", paddingTop: 96, paddingRight: 14, backgroundColor: "rgba(15, 23, 42, 0.16)" },
-  menuPanel: { width: 132, borderRadius: 8, backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", overflow: "hidden" },
-  menuItem: { minHeight: 42, justifyContent: "center", paddingHorizontal: 12 },
-  menuItemActive: { backgroundColor: "#0f766e" },
-  menuItemText: { color: "#0f172a", fontWeight: "700" },
-  menuItemTextActive: { color: "#fff" },
   calendarOption: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 6 },
   calendarOptionActive: { borderColor: "#0f766e", backgroundColor: "#ccfbf1" },
   calendarLine: { flexDirection: "row", alignItems: "center", gap: 8 },
-  typeBadge: { overflow: "hidden", borderRadius: 6, backgroundColor: "#e2e8f0", color: "#334155", fontSize: 11, fontWeight: "700", paddingHorizontal: 7, paddingVertical: 3 },
-  smsPatternRow: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, flexDirection: "row", alignItems: "center", gap: 8 },
   preferencePreview: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 4 },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15, 23, 42, 0.26)", alignItems: "center", justifyContent: "center" },
 });

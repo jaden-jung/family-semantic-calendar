@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 
@@ -45,10 +44,6 @@ def build_event_embedding_text(
     ends_at: datetime | None = None,
     recurrence_rule: dict[str, Any] | None = None,
     source: str = "manual",
-    merchant: str | None = None,
-    amount: Decimal | None = None,
-    category: str | None = None,
-    payment_method: str | None = None,
     raw_text: str | None = None,
 ) -> str:
     date_text, month_text, time_text = format_dt(starts_at)
@@ -59,19 +54,11 @@ def build_event_embedding_text(
         f"일정일: {date_text}",
         f"월: {month_text}",
         f"시간: {time_text}",
-        f"유형: {'카드 결제' if source == 'sms_payment' else '일반 일정'}",
+        "유형: 일반 일정",
         f"반복: {recurrence_text(recurrence_rule)}",
     ]
     if ends_at:
         lines.append(f"종료시간: {ends_at.strftime('%H:%M')}")
-    if merchant:
-        lines.append(f"가맹점: {merchant}")
-    if amount is not None:
-        lines.append(f"금액: {amount}원")
-    if category:
-        lines.append(f"카테고리: {category}")
-    if payment_method:
-        lines.append(f"결제방식: {payment_method}")
     if raw_text:
         lines.append(f"원문: {raw_text}")
     return "passage: " + "\n".join(line for line in lines if line)

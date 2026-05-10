@@ -9,7 +9,6 @@ from typing_extensions import Annotated
 from app.config import Settings, get_settings
 from app.db import close_pool, get_conn, init_db, open_pool
 from app.embeddings import EmbeddingProvider, get_embedding_provider
-from app.payments import parse_card_sms
 from app.search_text import build_event_embedding_text, build_query_embedding_text
 from app.schemas import (
     CalendarCreate,
@@ -18,10 +17,7 @@ from app.schemas import (
     EventCreate,
     EventOut,
     EventUpdate,
-    PaymentSmsCreate,
     SearchQuery,
-    SmsPatternCreate,
-    SmsPatternOut,
     UserCreate,
     UserOut,
     UserSignIn,
@@ -55,10 +51,6 @@ def event_embedding_text_from_payload(payload: EventCreate | EventUpdate) -> str
         starts_at=payload.starts_at,
         ends_at=payload.ends_at,
         recurrence_rule=payload.recurrence_rule,
-        merchant=payload.merchant,
-        amount=payload.amount,
-        category=payload.category,
-        payment_method=payload.payment_method,
     )
 
 
@@ -140,11 +132,11 @@ def create_calendar(payload: CalendarCreate):
             raise HTTPException(status_code=404, detail="Owner user not found")
         calendar = conn.execute(
             """
-            INSERT INTO calendars (name, calendar_type, owner_user_id)
-            VALUES (%s, %s, %s)
-            RETURNING id, name, calendar_type, invite_code
+            INSERT INTO calendars (name, owner_user_id)
+            VALUES (%s, %s)
+            RETURNING id, name, invite_code
             """,
-            (payload.name, payload.calendar_type, payload.owner_user_id),
+            (payload.name, payload.owner_user_id),
         ).fetchone()
         conn.execute(
             """
@@ -161,7 +153,7 @@ def create_calendar(payload: CalendarCreate):
 def join_calendar(payload: CalendarJoin):
     with get_conn() as conn:
         calendar = conn.execute(
-            "SELECT id, name, calendar_type, invite_code FROM calendars WHERE invite_code = %s",
+            "SELECT id, name, invite_code FROM calendars WHERE invite_code = %s",
             (payload.invite_code,),
         ).fetchone()
         if not calendar:
@@ -183,7 +175,7 @@ def list_calendars(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT c.id, c.name, c.calendar_type, c.invite_code, cm.role
+            SELECT c.id, c.name, c.invite_code, cm.role
             FROM calendars c
             JOIN calendar_members cm ON cm.calendar_id = c.id
             WHERE cm.user_id = %s
@@ -218,11 +210,10 @@ def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, De
         row = conn.execute(
             """
             INSERT INTO events (
-                calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule,
-                source, merchant, amount, category, payment_method, embedding
+                calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, embedding
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s::vector)
-            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category, payment_method
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::vector)
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             """,
             (
                 payload.calendar_id,
@@ -233,11 +224,6 @@ def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, De
                 payload.starts_at,
                 payload.ends_at,
                 json.dumps(payload.recurrence_rule) if payload.recurrence_rule else None,
-                "manual",
-                payload.merchant,
-                payload.amount,
-                payload.category,
-                payload.payment_method,
                 embedding,
             ),
         ).fetchone()
@@ -275,15 +261,10 @@ def update_event(
                 starts_at = %s,
                 ends_at = %s,
                 recurrence_rule = %s::jsonb,
-                source = %s,
-                merchant = %s,
-                amount = %s,
-                category = %s,
-                payment_method = %s,
                 embedding = %s::vector,
                 updated_at = now()
             WHERE id = %s
-            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category, payment_method
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             """,
             (
                 payload.created_by,
@@ -293,11 +274,6 @@ def update_event(
                 payload.starts_at,
                 payload.ends_at,
                 json.dumps(payload.recurrence_rule) if payload.recurrence_rule else None,
-                "manual",
-                payload.merchant,
-                payload.amount,
-                payload.category,
-                payload.payment_method,
                 embedding,
                 event_id,
             ),
@@ -327,7 +303,7 @@ def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category, payment_method
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             FROM events
             WHERE calendar_id = %s
             ORDER BY starts_at DESC
@@ -348,81 +324,14 @@ def search_events(
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category, payment_method
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             FROM events
             WHERE calendar_id = %s
+              AND (embedding <=> %s::vector) <= %s
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
-            (payload.calendar_id, query_embedding, payload.limit),
-        ).fetchall()
-
-
-@app.post("/sms/card-payments", response_model=EventOut)
-def ingest_card_payment_sms(
-    payload: PaymentSmsCreate,
-    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
-):
-    assert_member(payload.calendar_id, payload.created_by)
-    parsed = parse_card_sms(payload.raw_text, payload.received_at)
-    searchable_text = build_event_embedding_text(
-        title=parsed["title"],
-        body=parsed["body"],
-        location="",
-        starts_at=parsed["starts_at"],
-        source="sms_payment",
-        merchant=parsed["merchant"],
-        amount=parsed["amount"],
-        category=parsed["category"],
-        payment_method="card",
-        raw_text=payload.raw_text,
-    )
-    embedding = vector_literal(provider.embed(searchable_text))
-    with get_conn() as conn:
-        row = conn.execute(
-            """
-            INSERT INTO events (
-                calendar_id, created_by, title, body, starts_at, source,
-                merchant, amount, category, payment_method, raw_text, embedding
-            )
-            VALUES (%s, %s, %s, %s, %s, 'sms_payment', %s, %s, %s, 'card', %s, %s::vector)
-            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category, payment_method
-            """,
-            (
-                payload.calendar_id,
-                payload.created_by,
-                parsed["title"],
-                parsed["body"],
-                parsed["starts_at"],
-                parsed["merchant"],
-                parsed["amount"],
-                parsed["category"],
-                payload.raw_text,
-                embedding,
-            ),
-        ).fetchone()
-        conn.commit()
-        return row
-
-
-@app.get("/reports/spending")
-def spending_report(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
-    assert_member(calendar_id, x_user_id)
-    with get_conn() as conn:
-        return conn.execute(
-            """
-            SELECT
-                date_trunc('month', starts_at)::date AS month,
-                category,
-                sum(amount) AS total_amount,
-                count(*) AS transaction_count
-            FROM events
-            WHERE calendar_id = %s
-              AND amount IS NOT NULL
-            GROUP BY month, category
-            ORDER BY month DESC, total_amount DESC
-            """,
-            (calendar_id,),
+            (payload.calendar_id, query_embedding, payload.max_distance, query_embedding, payload.limit),
         ).fetchall()
 
 
@@ -431,8 +340,7 @@ def reembed_all_events(provider: Annotated[EmbeddingProvider, Depends(embedding_
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT id, title, body, location, starts_at, ends_at, recurrence_rule, source,
-                   merchant, amount, category, payment_method, raw_text
+            SELECT id, title, body, location, starts_at, ends_at, recurrence_rule, source, raw_text
             FROM events
             ORDER BY created_at ASC
             """
@@ -446,10 +354,6 @@ def reembed_all_events(provider: Annotated[EmbeddingProvider, Depends(embedding_
                 ends_at=row["ends_at"],
                 recurrence_rule=row["recurrence_rule"],
                 source=row["source"],
-                merchant=row["merchant"],
-                amount=row["amount"],
-                category=row["category"],
-                payment_method=row["payment_method"],
                 raw_text=row["raw_text"],
             )
             conn.execute(
@@ -458,55 +362,3 @@ def reembed_all_events(provider: Annotated[EmbeddingProvider, Depends(embedding_
             )
         conn.commit()
         return {"status": "ok", "updated": len(rows)}
-
-
-@app.get("/sms/patterns", response_model=list[SmsPatternOut])
-def list_sms_patterns(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
-    assert_member(calendar_id, x_user_id)
-    with get_conn() as conn:
-        return conn.execute(
-            """
-            SELECT id, calendar_id, sender_phone, sample_message, amount_marker, merchant_marker, datetime_marker
-            FROM sms_sender_patterns
-            WHERE calendar_id = %s
-            ORDER BY created_at DESC
-            """,
-            (calendar_id,),
-        ).fetchall()
-
-
-@app.post("/sms/patterns", response_model=SmsPatternOut)
-def create_sms_pattern(payload: SmsPatternCreate, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
-    assert_member(payload.calendar_id, x_user_id)
-    with get_conn() as conn:
-        row = conn.execute(
-            """
-            INSERT INTO sms_sender_patterns (
-                calendar_id, sender_phone, sample_message, amount_marker, merchant_marker, datetime_marker
-            )
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id, calendar_id, sender_phone, sample_message, amount_marker, merchant_marker, datetime_marker
-            """,
-            (
-                payload.calendar_id,
-                payload.sender_phone,
-                payload.sample_message,
-                payload.amount_marker,
-                payload.merchant_marker,
-                payload.datetime_marker,
-            ),
-        ).fetchone()
-        conn.commit()
-        return row
-
-
-@app.delete("/sms/patterns/{pattern_id}")
-def delete_sms_pattern(pattern_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
-    with get_conn() as conn:
-        row = conn.execute("SELECT calendar_id FROM sms_sender_patterns WHERE id = %s", (pattern_id,)).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="SMS pattern not found")
-        assert_member(row["calendar_id"], x_user_id)
-        conn.execute("DELETE FROM sms_sender_patterns WHERE id = %s", (pattern_id,))
-        conn.commit()
-        return {"status": "deleted"}
