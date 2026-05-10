@@ -79,6 +79,7 @@ def init_db() -> None:
                 location text NOT NULL DEFAULT '',
                 starts_at timestamptz NOT NULL,
                 ends_at timestamptz,
+                recurrence_rule jsonb,
                 source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'sms_payment')),
                 merchant text,
                 amount numeric(14, 2),
@@ -91,6 +92,7 @@ def init_db() -> None:
             """
         )
         conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''")
+        conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS recurrence_rule jsonb")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS events_calendar_starts_at_idx

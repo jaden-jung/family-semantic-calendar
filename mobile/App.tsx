@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
@@ -16,14 +17,33 @@ import {
   View,
 } from "react-native";
 
-import { ApiClient, Calendar, EventItem, User } from "./src/api";
+import { ApiClient, Calendar, EventItem, RecurrenceRule, User } from "./src/api";
 
 const api = new ApiClient(process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8000");
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const savedUserKey = "family-calendar:user";
-const holidayKeys = new Set(["01-01", "03-01", "05-05", "06-06", "08-15", "10-03", "10-09", "12-25"]);
+const calendarColors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d"];
+const holidays: Record<string, string> = {
+  "01-01": "신정",
+  "03-01": "삼일절",
+  "05-01": "노동절",
+  "05-05": "어린이날",
+  "06-06": "현충일",
+  "08-15": "광복절",
+  "10-03": "개천절",
+  "10-09": "한글날",
+  "12-25": "성탄절",
+};
 
 type ViewMode = "month" | "week" | "day";
+type RepeatType = "daily" | "weekly" | "monthly" | "yearly";
+type MonthMode = "day" | "weekday";
+type DisplayEvent = EventItem & {
+  occurrenceKey: string;
+  originalStartsAt: string;
+  color: string;
+  calendarName: string;
+};
 type EventForm = {
   title: string;
   body: string;
@@ -31,6 +51,14 @@ type EventForm = {
   date: string;
   time: string;
   ownerId: string;
+  repeatEnabled: boolean;
+  repeatType: RepeatType;
+  repeatInterval: string;
+  repeatWeekday: string;
+  repeatMonthMode: MonthMode;
+  repeatMonthDay: string;
+  repeatWeekOfMonth: string;
+  repeatLunar: boolean;
 };
 
 function pad(value: number) {
@@ -53,7 +81,7 @@ function addDays(date: Date, amount: number) {
 }
 
 function addMonths(date: Date, amount: number) {
-  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+  return new Date(date.getFullYear(), date.getMonth() + amount, date.getDate());
 }
 
 function monthLabel(date: Date) {
@@ -70,7 +98,6 @@ function startOfMonthGrid(date: Date) {
 function normalizeTime(input: string) {
   const value = input.trim();
   if (!value) return "";
-
   const colonMatch = value.match(/^(\d{1,2}):(\d{1,2})$/);
   if (colonMatch) {
     const hour = Number(colonMatch[1]);
@@ -78,9 +105,8 @@ function normalizeTime(input: string) {
     if (hour <= 23 && minute <= 59) return `${pad(hour)}:${pad(minute)}`;
     return null;
   }
-
   const compact = value.replace(/\D/g, "");
-  if (compact.length === 1 || compact.length === 2) {
+  if (compact.length <= 2) {
     const hour = Number(compact);
     if (hour <= 23) return `${pad(hour)}:00`;
     return null;
@@ -89,7 +115,6 @@ function normalizeTime(input: string) {
     const hour = Number(compact.slice(0, -2));
     const minute = Number(compact.slice(-2));
     if (hour <= 23 && minute <= 59) return `${pad(hour)}:${pad(minute)}`;
-    return null;
   }
   return null;
 }
@@ -107,12 +132,103 @@ function timeFromIso(value: string) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function holidayName(date: Date) {
+  return holidays[`${pad(date.getMonth() + 1)}-${pad(date.getDate())}`] || "";
+}
+
 function isHoliday(date: Date) {
-  return date.getDay() === 0 || holidayKeys.has(`${pad(date.getMonth() + 1)}-${pad(date.getDate())}`);
+  return date.getDay() === 0 || Boolean(holidayName(date));
 }
 
 function ownerName(members: User[], id: string | null) {
   return members.find((member) => member.id === id)?.display_name || "알 수 없음";
+}
+
+function nthWeekdayDate(year: number, month: number, weekday: number, weekOfMonth: number) {
+  const first = new Date(year, month, 1);
+  const offset = (weekday - first.getDay() + 7) % 7;
+  return new Date(year, month, 1 + offset + (weekOfMonth - 1) * 7);
+}
+
+function buildRule(form: EventForm): RecurrenceRule | null {
+  if (!form.repeatEnabled) return null;
+  const interval = Math.max(1, Number(form.repeatInterval || 1));
+  if (form.repeatType === "daily") return { frequency: "daily", interval };
+  if (form.repeatType === "weekly") {
+    return { frequency: "weekly", interval: Math.min(3, interval), weekdays: [Number(form.repeatWeekday)] };
+  }
+  if (form.repeatType === "monthly") {
+    if (form.repeatMonthMode === "weekday") {
+      return {
+        frequency: "monthly",
+        interval: 1,
+        weekdays: [Number(form.repeatWeekday)],
+        weekOfMonth: Math.max(1, Math.min(5, Number(form.repeatWeekOfMonth || 1))),
+      };
+    }
+    return { frequency: "monthly", interval: 1, monthDay: Math.max(1, Math.min(31, Number(form.repeatMonthDay || 1))) };
+  }
+  return { frequency: "yearly", interval: 1, lunar: form.repeatLunar };
+}
+
+function expandEvents(events: EventItem[], calendars: Calendar[], rangeStart: Date, rangeEnd: Date): DisplayEvent[] {
+  const displays: DisplayEvent[] = [];
+  const calendarInfo = new Map(calendars.map((calendar, index) => [calendar.id, { name: calendar.name, color: calendarColors[index % calendarColors.length] }]));
+
+  function pushEvent(event: EventItem, startsAt: Date) {
+    if (startsAt < new Date(event.starts_at)) return;
+    if (startsAt < rangeStart || startsAt > rangeEnd) return;
+    const info = calendarInfo.get(event.calendar_id) || { name: "달력", color: "#0f766e" };
+    displays.push({
+      ...event,
+      starts_at: startsAt.toISOString(),
+      occurrenceKey: `${event.id}:${toDateKey(startsAt)}`,
+      originalStartsAt: event.starts_at,
+      color: info.color,
+      calendarName: info.name,
+    });
+  }
+
+  events.forEach((event) => {
+    const start = new Date(event.starts_at);
+    const rule = event.recurrence_rule;
+    if (!rule) {
+      pushEvent(event, start);
+      return;
+    }
+
+    const interval = Math.max(1, rule.interval || 1);
+    if (rule.frequency === "daily") {
+      for (let current = new Date(start); current <= rangeEnd; current = addDays(current, interval)) pushEvent(event, current);
+    }
+    if (rule.frequency === "weekly") {
+      for (let cursor = new Date(start); cursor <= rangeEnd; cursor = addDays(cursor, 1)) {
+        const weeks = Math.floor((cursor.getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000));
+        if (weeks >= 0 && weeks % interval === 0 && (rule.weekdays || [start.getDay()]).includes(cursor.getDay())) {
+          const occurrence = new Date(cursor);
+          occurrence.setHours(start.getHours(), start.getMinutes(), 0, 0);
+          pushEvent(event, occurrence);
+        }
+      }
+    }
+    if (rule.frequency === "monthly") {
+      for (let cursor = new Date(start.getFullYear(), start.getMonth(), 1); cursor <= rangeEnd; cursor = new Date(cursor.getFullYear(), cursor.getMonth() + interval, 1)) {
+        const occurrence = rule.weekOfMonth
+          ? nthWeekdayDate(cursor.getFullYear(), cursor.getMonth(), (rule.weekdays || [start.getDay()])[0], rule.weekOfMonth)
+          : new Date(cursor.getFullYear(), cursor.getMonth(), rule.monthDay || start.getDate());
+        occurrence.setHours(start.getHours(), start.getMinutes(), 0, 0);
+        pushEvent(event, occurrence);
+      }
+    }
+    if (rule.frequency === "yearly") {
+      for (let year = start.getFullYear(); year <= rangeEnd.getFullYear(); year += interval) {
+        const occurrence = new Date(year, start.getMonth(), start.getDate(), start.getHours(), start.getMinutes(), 0, 0);
+        pushEvent(event, occurrence);
+      }
+    }
+  });
+
+  return displays.sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
 }
 
 async function readSavedUser() {
@@ -127,7 +243,7 @@ async function writeSavedUser(user: User) {
   try {
     await SecureStore.setItemAsync(savedUserKey, JSON.stringify(user));
   } catch {
-    // SecureStore is only a convenience cache. Account creation should still succeed.
+    // Best-effort local cache only.
   }
 }
 
@@ -138,6 +254,7 @@ export default function App() {
   const [calendarName, setCalendarName] = useState("우리집 달력");
   const [inviteCode, setInviteCode] = useState("");
   const [calendars, setCalendars] = useState<Calendar[]>([]);
+  const [visibleCalendarIds, setVisibleCalendarIds] = useState<string[]>([]);
   const [members, setMembers] = useState<User[]>([]);
   const [selectedCalendarId, setSelectedCalendarId] = useState("");
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -148,31 +265,24 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
-  const [form, setForm] = useState<EventForm>({
-    title: "",
-    body: "",
-    location: "",
-    date: toDateKey(new Date()),
-    time: "",
-    ownerId: "",
-  });
+  const [repeatOpen, setRepeatOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<DisplayEvent | null>(null);
+  const [form, setForm] = useState<EventForm>(blankForm(toDateKey(new Date()), ""));
   const [loading, setLoading] = useState(false);
 
-  const selectedCalendar = useMemo(
-    () => calendars.find((calendar) => calendar.id === selectedCalendarId),
-    [calendars, selectedCalendarId],
-  );
-
+  const selectedCalendar = calendars.find((calendar) => calendar.id === selectedCalendarId);
+  const activeCalendars = calendars.filter((calendar) => visibleCalendarIds.includes(calendar.id));
+  const rangeStart = addDays(startOfMonthGrid(visibleDate), -35);
+  const rangeEnd = addDays(rangeStart, 520);
+  const displayEvents = useMemo(() => expandEvents(events, calendars, rangeStart, rangeEnd), [events, calendars, rangeStart.getTime(), rangeEnd.getTime()]);
   const eventsByDate = useMemo(() => {
-    const map = new Map<string, EventItem[]>();
-    events.forEach((event) => {
+    const map = new Map<string, DisplayEvent[]>();
+    displayEvents.forEach((event) => {
       const key = toDateKey(new Date(event.starts_at));
       map.set(key, [...(map.get(key) || []), event]);
     });
     return map;
-  }, [events]);
-
+  }, [displayEvents]);
   const selectedEvents = eventsByDate.get(selectedDateKey) || [];
   const todayKey = toDateKey(new Date());
 
@@ -208,14 +318,32 @@ export default function App() {
   }, [userId]);
 
   useEffect(() => {
-    if (selectedCalendarId && userId) {
-      void refreshEvents(selectedCalendarId);
-      void refreshMembers(selectedCalendarId);
-    } else {
-      setEvents([]);
-      setMembers([]);
-    }
+    if (userId && visibleCalendarIds.length) void refreshEvents(visibleCalendarIds);
+  }, [visibleCalendarIds.join(","), userId]);
+
+  useEffect(() => {
+    if (selectedCalendarId && userId) void refreshMembers(selectedCalendarId);
   }, [selectedCalendarId, userId]);
+
+  function blankForm(dateKey: string, ownerId: string): EventForm {
+    const date = dateFromKey(dateKey);
+    return {
+      title: "",
+      body: "",
+      location: "",
+      date: dateKey,
+      time: "",
+      ownerId,
+      repeatEnabled: false,
+      repeatType: "daily",
+      repeatInterval: "1",
+      repeatWeekday: String(date.getDay()),
+      repeatMonthMode: "day",
+      repeatMonthDay: String(date.getDate()),
+      repeatWeekOfMonth: String(Math.ceil(date.getDate() / 7)),
+      repeatLunar: false,
+    };
+  }
 
   async function restoreUser() {
     try {
@@ -250,16 +378,23 @@ export default function App() {
       const calendar = await api.createCalendar(calendarName.trim() || "우리집 달력", user.id);
       setCalendars([calendar]);
       setSelectedCalendarId(calendar.id);
+      setVisibleCalendarIds([calendar.id]);
       setMembers([user]);
     });
   }
 
   async function createCalendar() {
-    if (!userId) return;
+    const name = calendarName.trim();
+    if (!userId || !name) return;
+    if (calendars.some((calendar) => calendar.name.trim() === name)) {
+      Alert.alert("중복된 달력", "같은 이름의 달력이 이미 있습니다.");
+      return;
+    }
     await withLoading(async () => {
-      const calendar = await api.createCalendar(calendarName.trim() || "새 달력", userId);
+      const calendar = await api.createCalendar(name, userId);
       setCalendars((current) => [calendar, ...current]);
       setSelectedCalendarId(calendar.id);
+      setVisibleCalendarIds((current) => [calendar.id, ...current]);
       setSettingsOpen(false);
     });
   }
@@ -270,6 +405,7 @@ export default function App() {
       const calendar = await api.joinCalendar(inviteCode.trim(), userId);
       setCalendars((current) => [calendar, ...current.filter((item) => item.id !== calendar.id)]);
       setSelectedCalendarId(calendar.id);
+      setVisibleCalendarIds((current) => Array.from(new Set([calendar.id, ...current])));
       setInviteCode("");
       setSettingsOpen(false);
     });
@@ -279,6 +415,7 @@ export default function App() {
     const items = await api.listCalendars(userId);
     setCalendars(items);
     setSelectedCalendarId((current) => current || items[0]?.id || "");
+    setVisibleCalendarIds((current) => (current.length ? current.filter((id) => items.some((calendar) => calendar.id === id)) : items.map((calendar) => calendar.id)));
   }
 
   async function refreshMembers(calendarId: string) {
@@ -286,9 +423,9 @@ export default function App() {
     setMembers(items);
   }
 
-  async function refreshEvents(calendarId: string) {
-    const items = await api.listEvents(calendarId, userId);
-    setEvents(items);
+  async function refreshEvents(calendarIds: string[]) {
+    const groups = await Promise.all(calendarIds.map((calendarId) => api.listEvents(calendarId, userId)));
+    setEvents(groups.flat());
   }
 
   function movePeriod(direction: number) {
@@ -304,35 +441,38 @@ export default function App() {
       setVisibleDate(new Date(next.getFullYear(), next.getMonth(), 1));
       return;
     }
-    const next = addMonths(visibleDate, direction);
-    setVisibleDate(next);
+    setVisibleDate((current) => new Date(current.getFullYear(), current.getMonth() + direction, 1));
   }
 
   function openCreateForm(dateKey = selectedDateKey) {
     setEditingEvent(null);
-    setForm({
-      title: "",
-      body: "",
-      location: "",
-      date: dateKey,
-      time: "",
-      ownerId: members[0]?.id || userId,
-    });
+    setForm(blankForm(dateKey, members[0]?.id || userId));
     setOwnerMenuOpen(false);
+    setRepeatOpen(false);
     setFormOpen(true);
   }
 
-  function openEditForm(event: EventItem) {
+  function openEditForm(event: DisplayEvent) {
+    const originalDate = new Date(event.originalStartsAt);
+    const rule = event.recurrence_rule;
     setEditingEvent(event);
     setForm({
+      ...blankForm(toDateKey(originalDate), event.created_by || userId),
       title: event.title,
       body: event.body,
       location: event.location || "",
-      date: toDateKey(new Date(event.starts_at)),
-      time: event.ends_at ? timeFromIso(event.starts_at) : "",
-      ownerId: event.created_by || userId,
+      time: event.ends_at ? timeFromIso(event.originalStartsAt) : "",
+      repeatEnabled: Boolean(rule),
+      repeatType: (rule?.frequency as RepeatType) || "daily",
+      repeatInterval: String(rule?.interval || 1),
+      repeatWeekday: String(rule?.weekdays?.[0] ?? originalDate.getDay()),
+      repeatMonthMode: rule?.weekOfMonth ? "weekday" : "day",
+      repeatMonthDay: String(rule?.monthDay || originalDate.getDate()),
+      repeatWeekOfMonth: String(rule?.weekOfMonth || Math.ceil(originalDate.getDate() / 7)),
+      repeatLunar: Boolean(rule?.lunar),
     });
     setOwnerMenuOpen(false);
+    setRepeatOpen(Boolean(rule));
     setFormOpen(true);
   }
 
@@ -347,7 +487,6 @@ export default function App() {
       Alert.alert("입력 확인", "제목과 사용자 선택은 필수입니다.");
       return;
     }
-
     await withLoading(async () => {
       const payload = {
         created_by: form.ownerId,
@@ -356,17 +495,15 @@ export default function App() {
         location: form.location.trim(),
         starts_at: startsAt,
         ends_at: normalizedTime ? startsAt : null,
+        recurrence_rule: buildRule(form),
       };
-      if (editingEvent) {
-        await api.updateEvent(editingEvent.id, payload, userId);
-      } else {
-        await api.createEvent({ calendar_id: selectedCalendarId, ...payload });
-      }
+      if (editingEvent) await api.updateEvent(editingEvent.id, payload, userId);
+      else await api.createEvent({ calendar_id: selectedCalendarId, ...payload });
       setSelectedDateKey(form.date);
       const savedDate = dateFromKey(form.date);
       setVisibleDate(new Date(savedDate.getFullYear(), savedDate.getMonth(), 1));
       setFormOpen(false);
-      await refreshEvents(selectedCalendarId);
+      await refreshEvents(visibleCalendarIds);
     });
   }
 
@@ -381,11 +518,18 @@ export default function App() {
           void withLoading(async () => {
             await api.deleteEvent(editingEvent.id, userId);
             setFormOpen(false);
-            await refreshEvents(selectedCalendarId);
+            await refreshEvents(visibleCalendarIds);
           });
         },
       },
     ]);
+  }
+
+  function toggleVisibleCalendar(calendarId: string) {
+    setVisibleCalendarIds((current) => {
+      if (current.includes(calendarId)) return current.filter((id) => id !== calendarId);
+      return [...current, calendarId];
+    });
   }
 
   function modeLabel(mode: ViewMode) {
@@ -394,38 +538,15 @@ export default function App() {
     return "일";
   }
 
-  if (booting) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.centerPanel}>
-          <ActivityIndicator />
-        </View>
-      </SafeAreaView>
-    );
+  function copyInviteCode(code: string) {
+    void Clipboard.setStringAsync(code);
+    Alert.alert("복사됨", "초대코드를 클립보드에 복사했습니다.");
   }
 
-  if (!userId) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <StatusBar style="dark" />
-        <View style={styles.setup}>
-          <View style={styles.brandRow}>
-            <Feather name="calendar" size={30} color="#0f766e" />
-            <Text style={styles.appTitle}>Family Calendar</Text>
-          </View>
-          <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" style={styles.input} />
-          <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="처음 만들 달력 이름" style={styles.input} />
-          <Pressable style={styles.primaryButton} onPress={createUser}>
-            <Feather name="user-plus" size={18} color="#fff" />
-            <Text style={styles.primaryButtonText}>사용자 등록</Text>
-          </Pressable>
-          {loading ? <ActivityIndicator /> : null}
-        </View>
-      </SafeAreaView>
-    );
-  }
+  if (booting) return <LoadingScreen />;
+  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} calendarName={calendarName} setCalendarName={setCalendarName} createUser={createUser} loading={loading} />;
 
-  if (!selectedCalendarId) {
+  if (!visibleCalendarIds.length) {
     return (
       <SafeAreaView style={styles.safe}>
         <StatusBar style="dark" />
@@ -436,13 +557,14 @@ export default function App() {
           </Pressable>
         </View>
         <View style={styles.centerPanel}>
-          <Text style={styles.sectionTitle}>참여 중인 달력이 없습니다.</Text>
+          <Text style={styles.sectionTitle}>표시할 달력이 없습니다.</Text>
           <Pressable style={styles.primaryButtonWide} onPress={() => setSettingsOpen(true)}>
             <Feather name="calendar" size={18} color="#fff" />
             <Text style={styles.primaryButtonText}>달력 추가/선택</Text>
           </Pressable>
         </View>
         {renderSettingsModal()}
+        {loading ? <LoadingOverlay /> : null}
       </SafeAreaView>
     );
   }
@@ -454,7 +576,7 @@ export default function App() {
         <View style={styles.topBar}>
           <View>
             <Text style={styles.appTitle}>Family Calendar</Text>
-            <Text style={styles.muted}>{selectedCalendar?.name || "달력 없음"}</Text>
+            <Text style={styles.muted}>{activeCalendars.map((calendar) => calendar.name).join(", ")}</Text>
           </View>
           <Pressable style={styles.navButton} onPress={() => setSettingsOpen(true)}>
             <Feather name="settings" size={22} color="#0f172a" />
@@ -489,10 +611,10 @@ export default function App() {
             {calendarDays.map((date) => {
               const key = toDateKey(date);
               const dayEvents = eventsByDate.get(key) || [];
+              const name = holidayName(date);
               const isCurrentMonth = date.getMonth() === visibleDate.getMonth();
               const isSelected = key === selectedDateKey;
-              const isToday = key === todayKey;
-              const redDay = isHoliday(date);
+              const isToday = key === toDateKey(new Date());
               const eventLimit = viewMode === "day" ? 50 : viewMode === "week" ? 8 : 2;
               return (
                 <Pressable
@@ -510,11 +632,12 @@ export default function App() {
                     setVisibleDate(new Date(date.getFullYear(), date.getMonth(), 1));
                   }}
                 >
-                  <Text style={[styles.dayNumber, redDay && styles.holidayText, !isCurrentMonth && viewMode === "month" && styles.outsideText]}>
+                  <Text style={[styles.dayNumber, isHoliday(date) && styles.holidayText, !isCurrentMonth && viewMode === "month" && styles.outsideText]}>
                     {viewMode === "day" ? `${key} ${dayLabels[date.getDay()]}` : date.getDate()}
                   </Text>
+                  {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
                   {dayEvents.slice(0, eventLimit).map((event) => (
-                    <Text key={event.id} numberOfLines={viewMode === "day" ? 2 : 1} style={[styles.eventChip, viewMode === "day" && styles.dayEventChip]}>
+                    <Text key={event.occurrenceKey} numberOfLines={viewMode === "day" ? 2 : 1} style={[styles.eventChip, { borderLeftColor: event.color }, viewMode === "day" && styles.dayEventChip]}>
                       {viewMode === "day" ? `${timeFromIso(event.starts_at)} ${event.title} ${event.location ? `· ${event.location}` : ""}` : event.title}
                     </Text>
                   ))}
@@ -535,11 +658,12 @@ export default function App() {
         <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListContent}>
           {selectedEvents.length === 0 ? <Text style={styles.emptyText}>등록된 일정이 없습니다.</Text> : null}
           {selectedEvents.map((event) => (
-            <Pressable key={event.id} style={styles.eventRow} onPress={() => openEditForm(event)}>
+            <Pressable key={event.occurrenceKey} style={[styles.eventRow, { borderLeftColor: event.color }]} onPress={() => openEditForm(event)}>
               <Text style={styles.eventTitle}>{event.title}</Text>
               <Text style={styles.muted}>
-                {timeFromIso(event.starts_at)} · {ownerName(members, event.created_by)}
+                {timeFromIso(event.starts_at)} · {event.calendarName} · {ownerName(members, event.created_by)}
                 {event.location ? ` · ${event.location}` : ""}
+                {event.recurrence_rule ? " · 반복" : ""}
               </Text>
               {event.body ? <Text style={styles.eventBody}>{event.body}</Text> : null}
             </Pressable>
@@ -550,11 +674,7 @@ export default function App() {
       {renderModeMenu()}
       {renderEventModal()}
       {renderSettingsModal()}
-      {loading ? (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator color="#fff" />
-        </View>
-      ) : null}
+      {loading ? <LoadingOverlay /> : null}
     </SafeAreaView>
   );
 
@@ -585,7 +705,7 @@ export default function App() {
     return (
       <Modal visible={formOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalPanel}>
+          <ScrollView style={styles.modalPanel} contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.sectionTitle}>{editingEvent ? "일정 수정" : "일정 추가"}</Text>
               <Pressable style={styles.navButton} onPress={() => setFormOpen(false)}>
@@ -628,6 +748,13 @@ export default function App() {
                 ))}
               </View>
             ) : null}
+
+            <Pressable style={styles.detailToggle} onPress={() => setRepeatOpen((current) => !current)}>
+              <Text style={styles.fieldLabel}>반복 상세</Text>
+              <Feather name={repeatOpen ? "chevron-up" : "chevron-down"} size={18} color="#0f172a" />
+            </Pressable>
+            {repeatOpen ? renderRepeatControls() : null}
+
             <Pressable style={styles.primaryButton} onPress={saveEvent}>
               <Feather name="check" size={18} color="#fff" />
               <Text style={styles.primaryButtonText}>{editingEvent ? "변경 저장" : "등록"}</Text>
@@ -638,36 +765,99 @@ export default function App() {
                 <Text style={styles.primaryButtonText}>삭제</Text>
               </Pressable>
             ) : null}
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     );
+  }
+
+  function renderRepeatControls() {
+    return (
+      <View style={styles.repeatBox}>
+        <Pressable style={styles.checkRow} onPress={() => setForm((current) => ({ ...current, repeatEnabled: !current.repeatEnabled }))}>
+          <Feather name={form.repeatEnabled ? "check-square" : "square"} size={20} color="#0f766e" />
+          <Text style={styles.eventTitle}>반복 사용</Text>
+        </Pressable>
+        {form.repeatEnabled ? (
+          <>
+            <View style={styles.pillRow}>
+              {(["daily", "weekly", "monthly", "yearly"] as RepeatType[]).map((type) => (
+                <Pressable key={type} style={[styles.modePill, form.repeatType === type && styles.modePillActive]} onPress={() => setForm((current) => ({ ...current, repeatType: type }))}>
+                  <Text style={[styles.modePillText, form.repeatType === type && styles.modePillTextActive]}>{type === "daily" ? "일" : type === "weekly" ? "주" : type === "monthly" ? "월" : "년"}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {form.repeatType === "daily" ? <TextInput value={form.repeatInterval} onChangeText={(repeatInterval) => setForm((current) => ({ ...current, repeatInterval }))} placeholder="며칠마다" keyboardType="number-pad" style={styles.input} /> : null}
+            {form.repeatType === "weekly" ? (
+              <>
+                <TextInput value={form.repeatInterval} onChangeText={(repeatInterval) => setForm((current) => ({ ...current, repeatInterval }))} placeholder="1~3주마다" keyboardType="number-pad" style={styles.input} />
+                <View style={styles.pillRow}>{renderWeekdayPills()}</View>
+              </>
+            ) : null}
+            {form.repeatType === "monthly" ? (
+              <>
+                <View style={styles.pillRow}>
+                  <Pressable style={[styles.modePill, form.repeatMonthMode === "day" && styles.modePillActive]} onPress={() => setForm((current) => ({ ...current, repeatMonthMode: "day" }))}>
+                    <Text style={[styles.modePillText, form.repeatMonthMode === "day" && styles.modePillTextActive]}>일자</Text>
+                  </Pressable>
+                  <Pressable style={[styles.modePill, form.repeatMonthMode === "weekday" && styles.modePillActive]} onPress={() => setForm((current) => ({ ...current, repeatMonthMode: "weekday" }))}>
+                    <Text style={[styles.modePillText, form.repeatMonthMode === "weekday" && styles.modePillTextActive]}>몇번째 주 요일</Text>
+                  </Pressable>
+                </View>
+                {form.repeatMonthMode === "day" ? <TextInput value={form.repeatMonthDay} onChangeText={(repeatMonthDay) => setForm((current) => ({ ...current, repeatMonthDay }))} placeholder="매월 몇 일" keyboardType="number-pad" style={styles.input} /> : null}
+                {form.repeatMonthMode === "weekday" ? (
+                  <>
+                    <TextInput value={form.repeatWeekOfMonth} onChangeText={(repeatWeekOfMonth) => setForm((current) => ({ ...current, repeatWeekOfMonth }))} placeholder="몇번째 주 (1~5)" keyboardType="number-pad" style={styles.input} />
+                    <View style={styles.pillRow}>{renderWeekdayPills()}</View>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+            {form.repeatType === "yearly" ? (
+              <Pressable style={styles.checkRow} onPress={() => setForm((current) => ({ ...current, repeatLunar: !current.repeatLunar }))}>
+                <Feather name={form.repeatLunar ? "check-square" : "square"} size={20} color="#0f766e" />
+                <Text style={styles.eventTitle}>음력 일자로 저장</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+      </View>
+    );
+  }
+
+  function renderWeekdayPills() {
+    return dayLabels.map((label, index) => (
+      <Pressable key={label} style={[styles.weekdayPill, form.repeatWeekday === String(index) && styles.modePillActive]} onPress={() => setForm((current) => ({ ...current, repeatWeekday: String(index) }))}>
+        <Text style={[styles.modePillText, form.repeatWeekday === String(index) && styles.modePillTextActive]}>{label}</Text>
+      </Pressable>
+    ));
   }
 
   function renderSettingsModal() {
     return (
       <Modal visible={settingsOpen} animationType="slide" transparent>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalPanel}>
+          <ScrollView style={styles.modalPanel} contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.sectionTitle}>설정</Text>
               <Pressable style={styles.navButton} onPress={() => setSettingsOpen(false)}>
                 <Feather name="x" size={22} color="#0f172a" />
               </Pressable>
             </View>
-            <Text style={styles.fieldLabel}>달력 선택</Text>
-            {calendars.map((calendar) => (
-              <Pressable
-                key={calendar.id}
-                style={[styles.calendarOption, calendar.id === selectedCalendarId && styles.calendarOptionActive]}
-                onPress={() => {
-                  setSelectedCalendarId(calendar.id);
-                  setSettingsOpen(false);
-                }}
-              >
-                <Text style={styles.eventTitle}>{calendar.name}</Text>
-                <Text style={styles.muted}>초대 코드 {calendar.invite_code}</Text>
-              </Pressable>
+            <Text style={styles.fieldLabel}>한 화면에 표시할 달력</Text>
+            {calendars.map((calendar, index) => (
+              <View key={calendar.id} style={[styles.calendarOption, visibleCalendarIds.includes(calendar.id) && styles.calendarOptionActive]}>
+                <Pressable style={styles.calendarLine} onPress={() => toggleVisibleCalendar(calendar.id)}>
+                  <Feather name={visibleCalendarIds.includes(calendar.id) ? "check-square" : "square"} size={20} color={calendarColors[index % calendarColors.length]} />
+                  <Text style={styles.eventTitle}>{calendar.name}</Text>
+                </Pressable>
+                <Pressable onLongPress={() => copyInviteCode(calendar.invite_code)}>
+                  <Text style={styles.muted}>초대 코드 {calendar.invite_code} · 길게 눌러 복사</Text>
+                </Pressable>
+                <Pressable onPress={() => setSelectedCalendarId(calendar.id)}>
+                  <Text style={styles.textButtonLabel}>기본 등록 달력으로 선택</Text>
+                </Pressable>
+              </View>
             ))}
             <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="새 달력 이름" style={styles.input} />
             <Pressable style={styles.primaryButton} onPress={createCalendar}>
@@ -683,405 +873,148 @@ export default function App() {
               <Text style={styles.fieldLabel}>개인화 설정 예정</Text>
               <Text style={styles.muted}>글자 크기, 색상, 시작 요일, 공휴일 기준 국가를 이곳에서 설정할 예정입니다.</Text>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     );
   }
 }
 
+function LoadingScreen() {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <View style={styles.centerPanel}>
+        <ActivityIndicator />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function LoadingOverlay() {
+  return (
+    <View style={styles.loadingOverlay}>
+      <ActivityIndicator color="#fff" />
+    </View>
+  );
+}
+
+function SetupScreen({
+  displayName,
+  setDisplayName,
+  calendarName,
+  setCalendarName,
+  createUser,
+  loading,
+}: {
+  displayName: string;
+  setDisplayName: (value: string) => void;
+  calendarName: string;
+  setCalendarName: (value: string) => void;
+  createUser: () => void;
+  loading: boolean;
+}) {
+  return (
+    <SafeAreaView style={styles.safe}>
+      <StatusBar style="dark" />
+      <View style={styles.setup}>
+        <View style={styles.brandRow}>
+          <Feather name="calendar" size={30} color="#0f766e" />
+          <Text style={styles.appTitle}>Family Calendar</Text>
+        </View>
+        <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" style={styles.input} />
+        <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="처음 만들 달력 이름" style={styles.input} />
+        <Pressable style={styles.primaryButton} onPress={createUser}>
+          <Feather name="user-plus" size={18} color="#fff" />
+          <Text style={styles.primaryButtonText}>사용자 등록</Text>
+        </Pressable>
+        {loading ? <ActivityIndicator /> : null}
+      </View>
+    </SafeAreaView>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#f7faf9",
-  },
-  screen: {
-    flex: 1,
-    padding: 14,
-    gap: 10,
-  },
-  setup: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 22,
-    gap: 12,
-  },
-  centerPanel: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 14,
-    padding: 22,
-  },
-  topBarOnly: {
-    padding: 14,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  brandRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 12,
-  },
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  appTitle: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  muted: {
-    color: "#64748b",
-    fontSize: 12,
-  },
-  input: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#0f172a",
-    backgroundColor: "#fff",
-  },
-  textArea: {
-    minHeight: 82,
-    textAlignVertical: "top",
-  },
-  primaryButton: {
-    minHeight: 44,
-    borderRadius: 6,
-    backgroundColor: "#0f766e",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  primaryButtonWide: {
-    minHeight: 44,
-    minWidth: 180,
-    borderRadius: 6,
-    backgroundColor: "#0f766e",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  primaryButtonText: {
-    color: "#fff",
-    fontWeight: "700",
-  },
-  secondaryButton: {
-    minHeight: 44,
-    borderRadius: 6,
-    backgroundColor: "#e2e8f0",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: "#0f172a",
-    fontWeight: "700",
-  },
-  dangerButton: {
-    minHeight: 44,
-    borderRadius: 6,
-    backgroundColor: "#b91c1c",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  monthBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  monthTitle: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  navButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#e2e8f0",
-  },
-  comboButton: {
-    minHeight: 36,
-    minWidth: 62,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  comboText: {
-    color: "#0f172a",
-    fontWeight: "700",
-  },
-  calendarWrap: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  weekHeader: {
-    flexDirection: "row",
-    backgroundColor: "#f1f5f9",
-    borderBottomWidth: 1,
-    borderBottomColor: "#cbd5e1",
-  },
-  weekLabel: {
-    width: "14.2857%",
-    textAlign: "center",
-    paddingVertical: 8,
-    color: "#334155",
-    fontWeight: "700",
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  weekGrid: {
-    minHeight: 168,
-  },
-  dayGrid: {
-    minHeight: 260,
-  },
-  dayCell: {
-    width: "14.2857%",
-    height: 76,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: "#e2e8f0",
-    padding: 5,
-    gap: 2,
-    backgroundColor: "#fff",
-  },
-  weekCell: {
-    height: 168,
-  },
-  singleDayCell: {
-    width: "100%",
-    height: 260,
-  },
-  outsideCell: {
-    backgroundColor: "#d8dee7",
-  },
-  todayCell: {
-    backgroundColor: "#fef3c7",
-  },
-  selectedCell: {
-    borderWidth: 2,
-    borderColor: "#0f766e",
-  },
-  dayNumber: {
-    color: "#0f172a",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  holidayText: {
-    color: "#dc2626",
-  },
-  outsideText: {
-    color: "#475569",
-  },
-  eventChip: {
-    backgroundColor: "#e0f2fe",
-    color: "#075985",
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    fontSize: 10,
-  },
-  dayEventChip: {
-    fontSize: 13,
-    paddingVertical: 5,
-  },
-  moreText: {
-    fontSize: 10,
-    color: "#64748b",
-  },
-  listHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 2,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#334155",
-  },
-  textButton: {
-    minHeight: 32,
-    paddingHorizontal: 12,
-    justifyContent: "center",
-  },
-  textButtonLabel: {
-    color: "#0f766e",
-    fontWeight: "700",
-  },
-  eventList: {
-    flex: 1,
-  },
-  eventListContent: {
-    gap: 8,
-    paddingBottom: 28,
-  },
-  emptyText: {
-    color: "#64748b",
-    paddingVertical: 20,
-    textAlign: "center",
-  },
-  eventRow: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    padding: 10,
-    gap: 3,
-  },
-  eventTitle: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  eventBody: {
-    color: "#334155",
-    lineHeight: 19,
-  },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(15, 23, 42, 0.34)",
-  },
-  modalPanel: {
-    backgroundColor: "#f8fafc",
-    padding: 16,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-    gap: 10,
-    maxHeight: "92%",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  ownerSelect: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    minHeight: 44,
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  ownerSelectText: {
-    color: "#0f172a",
-    fontWeight: "700",
-  },
-  ownerMenu: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 6,
-    backgroundColor: "#fff",
-    overflow: "hidden",
-  },
-  ownerMenuItem: {
-    minHeight: 40,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-  },
-  ownerMenuItemActive: {
-    backgroundColor: "#0f766e",
-  },
-  ownerMenuText: {
-    color: "#0f172a",
-    fontWeight: "700",
-  },
-  ownerMenuTextActive: {
-    color: "#fff",
-  },
-  menuBackdrop: {
-    flex: 1,
-    alignItems: "flex-end",
-    paddingTop: 96,
-    paddingRight: 14,
-    backgroundColor: "rgba(15, 23, 42, 0.16)",
-  },
-  menuPanel: {
-    width: 132,
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    overflow: "hidden",
-  },
-  menuItem: {
-    minHeight: 42,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  menuItemActive: {
-    backgroundColor: "#0f766e",
-  },
-  menuItemText: {
-    color: "#0f172a",
-    fontWeight: "700",
-  },
-  menuItemTextActive: {
-    color: "#fff",
-  },
-  calendarOption: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    padding: 10,
-    gap: 2,
-  },
-  calendarOptionActive: {
-    borderColor: "#0f766e",
-    backgroundColor: "#ccfbf1",
-  },
-  preferencePreview: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    padding: 10,
-    gap: 4,
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15, 23, 42, 0.26)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  safe: { flex: 1, backgroundColor: "#f7faf9" },
+  screen: { flex: 1, padding: 14, gap: 10 },
+  setup: { flex: 1, justifyContent: "center", padding: 22, gap: 12 },
+  centerPanel: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 22 },
+  topBarOnly: { padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  appTitle: { fontSize: 24, fontWeight: "700", color: "#0f172a" },
+  muted: { color: "#64748b", fontSize: 12 },
+  input: { minHeight: 44, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, color: "#0f172a", backgroundColor: "#fff" },
+  textArea: { minHeight: 82, textAlignVertical: "top" },
+  primaryButton: { minHeight: 44, borderRadius: 6, backgroundColor: "#0f766e", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  primaryButtonWide: { minHeight: 44, minWidth: 180, borderRadius: 6, backgroundColor: "#0f766e", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  primaryButtonText: { color: "#fff", fontWeight: "700" },
+  secondaryButton: { minHeight: 44, borderRadius: 6, backgroundColor: "#e2e8f0", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  secondaryButtonText: { color: "#0f172a", fontWeight: "700" },
+  dangerButton: { minHeight: 44, borderRadius: 6, backgroundColor: "#b91c1c", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  monthBar: { flexDirection: "row", alignItems: "center", gap: 8 },
+  monthTitle: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  navButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#e2e8f0" },
+  comboButton: { minHeight: 36, minWidth: 62, borderRadius: 6, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
+  comboText: { color: "#0f172a", fontWeight: "700" },
+  calendarWrap: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, overflow: "hidden" },
+  weekHeader: { flexDirection: "row", backgroundColor: "#f1f5f9", borderBottomWidth: 1, borderBottomColor: "#cbd5e1" },
+  weekLabel: { width: "14.2857%", textAlign: "center", paddingVertical: 8, color: "#334155", fontWeight: "700" },
+  grid: { flexDirection: "row", flexWrap: "wrap" },
+  weekGrid: { minHeight: 168 },
+  dayGrid: { minHeight: 260 },
+  dayCell: { width: "14.2857%", height: 76, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 5, gap: 2, backgroundColor: "#fff" },
+  weekCell: { height: 168 },
+  singleDayCell: { width: "100%", height: 260 },
+  outsideCell: { backgroundColor: "#d8dee7" },
+  todayCell: { backgroundColor: "#fef3c7" },
+  selectedCell: { borderWidth: 2, borderColor: "#0f766e" },
+  dayNumber: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
+  holidayText: { color: "#dc2626" },
+  holidayName: { color: "#dc2626", fontSize: 9 },
+  outsideText: { color: "#475569" },
+  eventChip: { backgroundColor: "#e0f2fe", color: "#075985", borderRadius: 4, paddingHorizontal: 4, borderLeftWidth: 3, fontSize: 10 },
+  dayEventChip: { fontSize: 13, paddingVertical: 5 },
+  moreText: { fontSize: 10, color: "#64748b" },
+  listHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
+  sectionTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a" },
+  fieldLabel: { fontSize: 13, fontWeight: "700", color: "#334155" },
+  textButton: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center" },
+  textButtonLabel: { color: "#0f766e", fontWeight: "700" },
+  eventList: { flex: 1 },
+  eventListContent: { gap: 8, paddingBottom: 28 },
+  emptyText: { color: "#64748b", paddingVertical: 20, textAlign: "center" },
+  eventRow: { borderWidth: 1, borderLeftWidth: 4, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 3 },
+  eventTitle: { color: "#0f172a", fontSize: 15, fontWeight: "700" },
+  eventBody: { color: "#334155", lineHeight: 19 },
+  modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.34)" },
+  modalPanel: { backgroundColor: "#f8fafc", borderTopLeftRadius: 8, borderTopRightRadius: 8, maxHeight: "92%" },
+  modalContent: { padding: 16, gap: 10 },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  ownerSelect: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 12, minHeight: 44, backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  ownerSelectText: { color: "#0f172a", fontWeight: "700" },
+  ownerMenu: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, backgroundColor: "#fff", overflow: "hidden" },
+  ownerMenuItem: { minHeight: 40, justifyContent: "center", paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: "#e2e8f0" },
+  ownerMenuItemActive: { backgroundColor: "#0f766e" },
+  ownerMenuText: { color: "#0f172a", fontWeight: "700" },
+  ownerMenuTextActive: { color: "#fff" },
+  detailToggle: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  repeatBox: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 10 },
+  checkRow: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: 8 },
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  modePill: { minHeight: 32, borderRadius: 16, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#fff", paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
+  weekdayPill: { width: 34, minHeight: 32, borderRadius: 16, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#fff", alignItems: "center", justifyContent: "center" },
+  modePillActive: { backgroundColor: "#0f766e", borderColor: "#0f766e" },
+  modePillText: { color: "#334155", fontWeight: "700" },
+  modePillTextActive: { color: "#fff" },
+  menuBackdrop: { flex: 1, alignItems: "flex-end", paddingTop: 96, paddingRight: 14, backgroundColor: "rgba(15, 23, 42, 0.16)" },
+  menuPanel: { width: 132, borderRadius: 8, backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", overflow: "hidden" },
+  menuItem: { minHeight: 42, justifyContent: "center", paddingHorizontal: 12 },
+  menuItemActive: { backgroundColor: "#0f766e" },
+  menuItemText: { color: "#0f172a", fontWeight: "700" },
+  menuItemTextActive: { color: "#fff" },
+  calendarOption: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 6 },
+  calendarOptionActive: { borderColor: "#0f766e", backgroundColor: "#ccfbf1" },
+  calendarLine: { flexDirection: "row", alignItems: "center", gap: 8 },
+  preferencePreview: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 4 },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(15, 23, 42, 0.26)", alignItems: "center", justifyContent: "center" },
 });

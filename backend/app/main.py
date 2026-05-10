@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from typing_extensions import Annotated
@@ -157,10 +158,10 @@ def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, De
         row = conn.execute(
             """
             INSERT INTO events (
-                calendar_id, created_by, title, body, location, starts_at, ends_at, embedding
+                calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, embedding
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
-            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::vector)
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category
             """,
             (
                 payload.calendar_id,
@@ -170,6 +171,7 @@ def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, De
                 payload.location,
                 payload.starts_at,
                 payload.ends_at,
+                json.dumps(payload.recurrence_rule) if payload.recurrence_rule else None,
                 embedding,
             ),
         ).fetchone()
@@ -206,10 +208,11 @@ def update_event(
                 location = %s,
                 starts_at = %s,
                 ends_at = %s,
+                recurrence_rule = %s::jsonb,
                 embedding = %s::vector,
                 updated_at = now()
             WHERE id = %s
-            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category
             """,
             (
                 payload.created_by,
@@ -218,6 +221,7 @@ def update_event(
                 payload.location,
                 payload.starts_at,
                 payload.ends_at,
+                json.dumps(payload.recurrence_rule) if payload.recurrence_rule else None,
                 embedding,
                 event_id,
             ),
@@ -247,7 +251,7 @@ def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category
             FROM events
             WHERE calendar_id = %s
             ORDER BY starts_at DESC
@@ -268,7 +272,7 @@ def search_events(
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category
             FROM events
             WHERE calendar_id = %s
             ORDER BY embedding <=> %s::vector
@@ -295,7 +299,7 @@ def ingest_card_payment_sms(
                 merchant, amount, category, raw_text, embedding
             )
             VALUES (%s, %s, %s, %s, %s, 'sms_payment', %s, %s, %s, %s, %s::vector)
-            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source, merchant, amount, category
             """,
             (
                 payload.calendar_id,

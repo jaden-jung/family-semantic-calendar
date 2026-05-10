@@ -10,6 +10,15 @@ export type Calendar = {
   role?: string;
 };
 
+export type RecurrenceRule = {
+  frequency: "daily" | "weekly" | "monthly" | "yearly";
+  interval?: number;
+  weekdays?: number[];
+  monthDay?: number;
+  weekOfMonth?: number;
+  lunar?: boolean;
+};
+
 export type EventItem = {
   id: string;
   calendar_id: string;
@@ -19,6 +28,7 @@ export type EventItem = {
   location: string;
   starts_at: string;
   ends_at: string | null;
+  recurrence_rule?: RecurrenceRule | null;
   source: "manual" | "sms_payment";
   merchant: string | null;
   amount: string | null;
@@ -40,6 +50,7 @@ type CreateEventPayload = {
   location: string;
   starts_at: string;
   ends_at?: string | null;
+  recurrence_rule?: RecurrenceRule | null;
 };
 
 type UpdateEventPayload = {
@@ -49,6 +60,7 @@ type UpdateEventPayload = {
   location: string;
   starts_at: string;
   ends_at?: string | null;
+  recurrence_rule?: RecurrenceRule | null;
 };
 
 type PaymentSmsPayload = {

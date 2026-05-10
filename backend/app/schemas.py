@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -41,6 +42,7 @@ class EventCreate(BaseModel):
     location: str = ""
     starts_at: datetime
     ends_at: datetime | None = None
+    recurrence_rule: dict[str, Any] | None = None
 
 
 class EventUpdate(BaseModel):
@@ -50,6 +52,7 @@ class EventUpdate(BaseModel):
     starts_at: datetime
     ends_at: datetime | None = None
     created_by: UUID
+    recurrence_rule: dict[str, Any] | None = None
 
 
 class PaymentSmsCreate(BaseModel):
@@ -68,6 +71,7 @@ class EventOut(BaseModel):
     location: str
     starts_at: datetime
     ends_at: datetime | None
+    recurrence_rule: dict[str, Any] | None = None
     source: str
     merchant: str | None
     amount: Decimal | None
