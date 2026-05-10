@@ -761,6 +761,7 @@ function CalendarApp() {
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   placeholder="예: 병원, 어린이날, 카드 식비"
+                  placeholderTextColor={placeholderColor}
                   returnKeyType="search"
                   onSubmitEditing={runSearch}
                   style={[styles.input, styles.searchInput]}
@@ -940,10 +941,10 @@ function CalendarApp() {
                 </Pressable>
               ))}
             </View>
-            {form.repeatType === "daily" ? <TextInput value={form.repeatInterval} onChangeText={(repeatInterval) => setForm((current) => ({ ...current, repeatInterval }))} placeholder="며칠마다" keyboardType="number-pad" style={styles.input} /> : null}
+            {form.repeatType === "daily" ? <TextInput value={form.repeatInterval} onChangeText={(repeatInterval) => setForm((current) => ({ ...current, repeatInterval }))} placeholder="며칠마다" placeholderTextColor={placeholderColor} keyboardType="number-pad" style={styles.input} /> : null}
             {form.repeatType === "weekly" ? (
               <>
-                <TextInput value={form.repeatInterval} onChangeText={(repeatInterval) => setForm((current) => ({ ...current, repeatInterval }))} placeholder="1~3주마다" keyboardType="number-pad" style={styles.input} />
+                <TextInput value={form.repeatInterval} onChangeText={(repeatInterval) => setForm((current) => ({ ...current, repeatInterval }))} placeholder="1~3주마다" placeholderTextColor={placeholderColor} keyboardType="number-pad" style={styles.input} />
                 <View style={styles.pillRow}>{renderWeekdayPills()}</View>
               </>
             ) : null}
@@ -957,10 +958,10 @@ function CalendarApp() {
                     <Text style={[styles.modePillText, form.repeatMonthMode === "weekday" && styles.modePillTextActive]}>몇번째 주 요일</Text>
                   </Pressable>
                 </View>
-                {form.repeatMonthMode === "day" ? <TextInput value={form.repeatMonthDay} onChangeText={(repeatMonthDay) => setForm((current) => ({ ...current, repeatMonthDay }))} placeholder="매월 몇 일" keyboardType="number-pad" style={styles.input} /> : null}
+                {form.repeatMonthMode === "day" ? <TextInput value={form.repeatMonthDay} onChangeText={(repeatMonthDay) => setForm((current) => ({ ...current, repeatMonthDay }))} placeholder="매월 몇 일" placeholderTextColor={placeholderColor} keyboardType="number-pad" style={styles.input} /> : null}
                 {form.repeatMonthMode === "weekday" ? (
                   <>
-                    <TextInput value={form.repeatWeekOfMonth} onChangeText={(repeatWeekOfMonth) => setForm((current) => ({ ...current, repeatWeekOfMonth }))} placeholder="몇번째 주 (1~5)" keyboardType="number-pad" style={styles.input} />
+                    <TextInput value={form.repeatWeekOfMonth} onChangeText={(repeatWeekOfMonth) => setForm((current) => ({ ...current, repeatWeekOfMonth }))} placeholder="몇번째 주 (1~5)" placeholderTextColor={placeholderColor} keyboardType="number-pad" style={styles.input} />
                     <View style={styles.pillRow}>{renderWeekdayPills()}</View>
                   </>
                 ) : null}
@@ -1015,14 +1016,14 @@ function CalendarApp() {
               </View>
             ))}
             <Text style={styles.fieldLabel}>검색 임계치</Text>
-            <TextInput value={searchMaxDistance} onChangeText={setSearchMaxDistance} placeholder="0.2" keyboardType="decimal-pad" style={styles.input} />
+            <TextInput value={searchMaxDistance} onChangeText={setSearchMaxDistance} placeholder="0.2" placeholderTextColor={placeholderColor} keyboardType="decimal-pad" style={styles.input} />
             <Text style={styles.muted}>낮을수록 더 비슷한 일정만 나옵니다. 로컬 임베딩은 보통 0.1~0.3 사이에서 조정하면 됩니다.</Text>
-            <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="새 달력 이름" style={styles.input} />
+            <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="새 달력 이름" placeholderTextColor={placeholderColor} style={styles.input} />
             <Pressable style={styles.primaryButton} onPress={createCalendar}>
               <Feather name="plus" size={18} color="#fff" />
               <Text style={styles.primaryButtonText}>달력 만들기</Text>
             </Pressable>
-            <TextInput value={inviteCode} onChangeText={setInviteCode} placeholder="초대 코드 입력" style={styles.input} />
+            <TextInput value={inviteCode} onChangeText={setInviteCode} placeholder="초대 코드 입력" placeholderTextColor={placeholderColor} style={styles.input} />
             <Pressable style={styles.secondaryButton} onPress={joinCalendar}>
               <Feather name="users" size={18} color="#0f172a" />
               <Text style={styles.secondaryButtonText}>초대 코드로 참여</Text>
@@ -1089,8 +1090,8 @@ function SetupScreen({
           <Feather name="calendar" size={30} color="#0f766e" />
           <Text style={styles.appTitle}>Family Calendar</Text>
         </View>
-        <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" style={styles.input} />
-        <TextInput value={password} onChangeText={setPassword} placeholder="비밀번호" secureTextEntry style={styles.input} />
+        <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" placeholderTextColor={placeholderColor} style={styles.input} />
+        <TextInput value={password} onChangeText={setPassword} placeholder="비밀번호" placeholderTextColor={placeholderColor} secureTextEntry style={styles.input} />
         <Pressable style={styles.secondaryButton} onPress={signIn}>
           <Feather name="log-in" size={18} color="#0f172a" />
           <Text style={styles.secondaryButtonText}>기존 사용자 로그인</Text>
