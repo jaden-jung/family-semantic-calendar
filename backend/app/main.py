@@ -124,6 +124,21 @@ def sign_in(payload: UserSignIn):
         return row
 
 
+@app.get("/users", response_model=list[UserOut])
+def list_users(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+    with get_conn() as conn:
+        user = conn.execute("SELECT 1 FROM users WHERE id = %s", (x_user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=403, detail="User not found")
+        return conn.execute(
+            """
+            SELECT id, display_name
+            FROM users
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
+
+
 @app.post("/calendars", response_model=CalendarOut)
 def create_calendar(payload: CalendarCreate):
     with get_conn() as conn:
@@ -202,8 +217,12 @@ def list_calendar_members(calendar_id: str, x_user_id: Annotated[str, Header(ali
 
 
 @app.post("/events", response_model=EventOut)
-def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, Depends(embedding_provider)]):
-    assert_member(payload.calendar_id, payload.created_by)
+def create_event(
+    payload: EventCreate,
+    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+):
+    assert_member(payload.calendar_id, x_user_id)
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
@@ -246,7 +265,6 @@ def update_event(
     if not existing:
         raise HTTPException(status_code=404, detail="Event not found")
     assert_member(existing["calendar_id"], x_user_id)
-    assert_member(existing["calendar_id"], payload.created_by)
 
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))

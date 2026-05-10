@@ -70,6 +70,12 @@ export class ApiClient {
     });
   }
 
+  async listUsers(userId: string): Promise<User[]> {
+    return this.request("/users", {
+      headers: { "X-User-Id": userId },
+    });
+  }
+
   async createCalendar(name: string, ownerUserId: string): Promise<Calendar> {
     return this.request("/calendars", {
       method: "POST",
@@ -96,9 +102,10 @@ export class ApiClient {
     });
   }
 
-  async createEvent(payload: CreateEventPayload): Promise<EventItem> {
+  async createEvent(payload: CreateEventPayload, userId: string): Promise<EventItem> {
     return this.request("/events", {
       method: "POST",
+      headers: { "X-User-Id": userId },
       body: payload,
     });
   }

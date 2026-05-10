@@ -6,22 +6,25 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { ApiClient, Calendar, EventItem, RecurrenceRule, User } from "./src/api";
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "https://desktop-lnu5cl7.tail96fe59.ts.net";
 const api = new ApiClient(apiBaseUrl);
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
+const placeholderColor = "#94a3b8";
 const savedUserKey = "family-calendar:user";
 const calendarColors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d"];
 const holidays: Record<string, string> = {
@@ -244,7 +247,7 @@ async function writeSavedUser(user: User) {
   }
 }
 
-export default function App() {
+function CalendarApp() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("가족");
@@ -257,7 +260,7 @@ export default function App() {
   const [selectedCalendarId, setSelectedCalendarId] = useState("");
   const [events, setEvents] = useState<EventItem[]>([]);
   const [visibleDate, setVisibleDate] = useState(() => new Date());
-  const [selectedDateKey, setSelectedDateKey] = useState(() => toDateKey(new Date()));
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -287,7 +290,7 @@ export default function App() {
     });
     return map;
   }, [displayEvents]);
-  const selectedEvents = eventsByDate.get(selectedDateKey) || [];
+  const selectedEvents = selectedDateKey ? eventsByDate.get(selectedDateKey) || [] : [];
   const todayKey = toDateKey(new Date());
 
   const calendarDays = useMemo(() => {
@@ -320,8 +323,8 @@ export default function App() {
   }, [visibleCalendarIds.join(","), userId]);
 
   useEffect(() => {
-    if (selectedCalendarId && userId) void refreshMembers(selectedCalendarId);
-  }, [selectedCalendarId, userId]);
+    if (userId) void refreshMembers();
+  }, [userId]);
 
   function blankForm(dateKey: string, ownerId: string, calendarId: string): EventForm {
     const date = dateFromKey(dateKey);
@@ -433,8 +436,8 @@ export default function App() {
     setVisibleCalendarIds((current) => (current.length ? current.filter((id) => items.some((calendar) => calendar.id === id)) : items.map((calendar) => calendar.id)));
   }
 
-  async function refreshMembers(calendarId: string) {
-    const items = await api.listCalendarMembers(calendarId, userId);
+  async function refreshMembers() {
+    const items = await api.listUsers(userId);
     setMembers(items);
   }
 
@@ -500,19 +503,17 @@ export default function App() {
     }
     const next = new Date(year, month - 1, 1);
     setVisibleDate(next);
-    setSelectedDateKey(toDateKey(next));
     setYearMonthOpen(false);
   }
 
   function movePeriod(direction: number) {
     setVisibleDate((current) => {
       const next = new Date(current.getFullYear(), current.getMonth() + direction, 1);
-      setSelectedDateKey(toDateKey(next));
       return next;
     });
   }
 
-  function openCreateForm(dateKey = selectedDateKey) {
+  function openCreateForm(dateKey = selectedDateKey || toDateKey(new Date())) {
     const defaultCalendarId = selectedCalendarId || visibleCalendarIds[0] || calendars[0]?.id || "";
     setEditingEvent(null);
     setForm(blankForm(dateKey, userId, defaultCalendarId));
@@ -569,7 +570,7 @@ export default function App() {
         recurrence_rule: buildRule(form),
       };
       if (editingEvent) await api.updateEvent(editingEvent.id, payload, userId);
-      else await api.createEvent({ calendar_id: form.calendarId, ...payload });
+      else await api.createEvent({ calendar_id: form.calendarId, ...payload }, userId);
       setSelectedDateKey(form.date);
       const savedDate = dateFromKey(form.date);
       setVisibleDate(new Date(savedDate.getFullYear(), savedDate.getMonth(), 1));
@@ -668,7 +669,7 @@ export default function App() {
         <View style={styles.calendarWrap} {...swipeResponder.panHandlers}>
           <View style={styles.weekHeader}>
             {dayLabels.map((label, index) => (
-              <Text key={label} style={[styles.weekLabel, index === 0 && styles.holidayText]}>
+              <Text key={label} style={[styles.weekLabel, index === 0 && styles.holidayText, index === 6 && styles.saturdayText]}>
                 {label}
               </Text>
             ))}
@@ -696,7 +697,7 @@ export default function App() {
                     setVisibleDate(new Date(date.getFullYear(), date.getMonth(), 1));
                   }}
                 >
-                  <Text style={[styles.dayNumber, isHoliday(date) && styles.holidayText, !isCurrentMonth && styles.outsideText]}>
+                  <Text style={[styles.dayNumber, date.getDay() === 6 && styles.saturdayText, isHoliday(date) && styles.holidayText, !isCurrentMonth && styles.outsideText]}>
                     {date.getDate()}
                   </Text>
                   {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
@@ -713,8 +714,8 @@ export default function App() {
         </View>
 
         <View style={styles.listHeader}>
-          <Text style={styles.sectionTitle}>{selectedDateKey} 일정</Text>
-          <Pressable style={styles.textButton} onPress={() => openCreateForm(selectedDateKey)}>
+          <Text style={styles.sectionTitle}>{selectedDateKey ? `${selectedDateKey} 일정` : "날짜를 선택하세요"}</Text>
+          <Pressable style={styles.textButton} onPress={() => openCreateForm(selectedDateKey || toDateKey(new Date()))}>
             <Text style={styles.textButtonLabel}>추가</Text>
           </Pressable>
         </View>
@@ -800,9 +801,25 @@ export default function App() {
                   <Feather name="x" size={22} color="#0f172a" />
                 </Pressable>
               </View>
-              <View style={styles.twoColumnRow}>
-                <TextInput value={yearInput} onChangeText={setYearInput} keyboardType="number-pad" placeholder="YYYY" style={[styles.input, styles.flexInput]} />
-                <TextInput value={monthInput} onChangeText={setMonthInput} keyboardType="number-pad" placeholder="MM" style={[styles.input, styles.flexInput]} />
+              <View style={styles.pickerRow}>
+                <View style={styles.wheelPicker}>
+                  <Pressable style={styles.navButton} onPress={() => setYearInput((value) => String(Math.min(2100, Number(value) + 1)))}>
+                    <Feather name="chevron-up" size={20} color="#0f172a" />
+                  </Pressable>
+                  <Text style={styles.pickerValue}>{yearInput}년</Text>
+                  <Pressable style={styles.navButton} onPress={() => setYearInput((value) => String(Math.max(1900, Number(value) - 1)))}>
+                    <Feather name="chevron-down" size={20} color="#0f172a" />
+                  </Pressable>
+                </View>
+                <View style={styles.wheelPicker}>
+                  <Pressable style={styles.navButton} onPress={() => setMonthInput((value) => String(Number(value) >= 12 ? 1 : Number(value) + 1))}>
+                    <Feather name="chevron-up" size={20} color="#0f172a" />
+                  </Pressable>
+                  <Text style={styles.pickerValue}>{monthInput}월</Text>
+                  <Pressable style={styles.navButton} onPress={() => setMonthInput((value) => String(Number(value) <= 1 ? 12 : Number(value) - 1))}>
+                    <Feather name="chevron-down" size={20} color="#0f172a" />
+                  </Pressable>
+                </View>
               </View>
               <Pressable style={styles.primaryButton} onPress={applyYearMonth}>
                 <Text style={styles.primaryButtonText}>이동</Text>
@@ -817,7 +834,7 @@ export default function App() {
   function renderEventModal() {
     return (
       <Modal visible={formOpen} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
           <ScrollView style={styles.modalPanel} contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.sectionTitle}>{editingEvent ? "일정 수정" : "일정 추가"}</Text>
@@ -847,7 +864,7 @@ export default function App() {
                 ))}
               </View>
             ) : null}
-            <TextInput value={form.date} onChangeText={(date) => setForm((current) => ({ ...current, date }))} placeholder="날짜 YYYY-MM-DD" style={styles.input} />
+            <TextInput value={form.date} onChangeText={(date) => setForm((current) => ({ ...current, date }))} placeholder="날짜 YYYY-MM-DD" placeholderTextColor={placeholderColor} style={styles.input} />
             <TextInput
               value={form.time}
               onChangeText={(time) => setForm((current) => ({ ...current, time }))}
@@ -856,12 +873,13 @@ export default function App() {
                 if (normalized) setForm((current) => ({ ...current, time: normalized }));
               }}
               placeholder="시간 15:00 또는 1500 (선택)"
+              placeholderTextColor={placeholderColor}
               keyboardType="numbers-and-punctuation"
               style={styles.input}
             />
-            <TextInput value={form.title} onChangeText={(title) => setForm((current) => ({ ...current, title }))} placeholder="제목" style={styles.input} />
-            <TextInput value={form.body} onChangeText={(body) => setForm((current) => ({ ...current, body }))} placeholder="설명" style={[styles.input, styles.textArea]} multiline />
-            <TextInput value={form.location} onChangeText={(location) => setForm((current) => ({ ...current, location }))} placeholder="장소" style={styles.input} />
+            <TextInput value={form.title} onChangeText={(title) => setForm((current) => ({ ...current, title }))} placeholder="제목" placeholderTextColor={placeholderColor} style={styles.input} />
+            <TextInput value={form.body} onChangeText={(body) => setForm((current) => ({ ...current, body }))} placeholder="설명" placeholderTextColor={placeholderColor} style={[styles.input, styles.textArea]} multiline />
+            <TextInput value={form.location} onChangeText={(location) => setForm((current) => ({ ...current, location }))} placeholder="장소" placeholderTextColor={placeholderColor} style={styles.input} />
             <Text style={styles.fieldLabel}>누구의 일정인가요?</Text>
             <Pressable style={styles.ownerSelect} onPress={() => setOwnerMenuOpen((current) => !current)}>
               <Text style={styles.ownerSelectText}>{ownerName(members, form.ownerId)}</Text>
@@ -901,7 +919,7 @@ export default function App() {
               </Pressable>
             ) : null}
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     );
   }
@@ -1020,6 +1038,14 @@ export default function App() {
   }
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <CalendarApp />
+    </SafeAreaProvider>
+  );
+}
+
 function LoadingScreen() {
   return (
     <SafeAreaView style={styles.safe}>
@@ -1114,6 +1140,7 @@ const styles = StyleSheet.create({
   selectedCell: { borderWidth: 2, borderColor: "#0f766e" },
   dayNumber: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
   holidayText: { color: "#dc2626" },
+  saturdayText: { color: "#2563eb" },
   holidayName: { color: "#dc2626", fontSize: 9 },
   outsideText: { color: "#475569" },
   eventChip: { backgroundColor: "#e0f2fe", color: "#075985", borderRadius: 4, paddingHorizontal: 4, borderLeftWidth: 3, fontSize: 10 },
@@ -1140,6 +1167,9 @@ const styles = StyleSheet.create({
   searchResultContent: { gap: 8, paddingBottom: 12 },
   twoColumnRow: { flexDirection: "row", gap: 8 },
   flexInput: { flex: 1 },
+  pickerRow: { flexDirection: "row", gap: 12 },
+  wheelPicker: { flex: 1, alignItems: "center", gap: 10, padding: 12, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, backgroundColor: "#fff" },
+  pickerValue: { fontSize: 22, fontWeight: "800", color: "#0f172a" },
   ownerSelect: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 12, minHeight: 44, backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   ownerSelectText: { color: "#0f172a", fontWeight: "700" },
   ownerMenu: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, backgroundColor: "#fff", overflow: "hidden" },
