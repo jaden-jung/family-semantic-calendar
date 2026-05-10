@@ -7,13 +7,18 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.familysemanticcalendar.app",
+      "usesCleartextTraffic": true,
       "permissions": []
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:8000"
+      "apiBaseUrl": "http://localhost:8000",
+      "eas": {
+        "projectId": "9385becd-c604-4b8f-ab02-1ccb09c7ae70"
+      }
     },
     "plugins": [
       "expo-secure-store"
-    ]
+    ],
+    "owner": "jaden85"
   }
 }
