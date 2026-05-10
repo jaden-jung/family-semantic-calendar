@@ -220,9 +220,10 @@ def list_calendar_members(calendar_id: str, x_user_id: Annotated[str, Header(ali
 def create_event(
     payload: EventCreate,
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
-    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
 ):
-    assert_member(payload.calendar_id, x_user_id)
+    current_user_id = x_user_id or str(payload.created_by)
+    assert_member(payload.calendar_id, current_user_id)
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
@@ -254,8 +255,8 @@ def create_event(
 def update_event(
     event_id: str,
     payload: EventUpdate,
-    x_user_id: Annotated[str, Header(alias="X-User-Id")],
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
+    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
 ):
     with get_conn() as conn:
         existing = conn.execute(
@@ -264,7 +265,8 @@ def update_event(
         ).fetchone()
     if not existing:
         raise HTTPException(status_code=404, detail="Event not found")
-    assert_member(existing["calendar_id"], x_user_id)
+    current_user_id = x_user_id or str(payload.created_by)
+    assert_member(existing["calendar_id"], current_user_id)
 
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
