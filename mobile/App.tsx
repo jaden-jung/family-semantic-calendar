@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Modal,
   PanResponder,
@@ -332,6 +333,15 @@ function CalendarApp() {
     if (userId) void refreshMembers();
   }, [userId]);
 
+  useEffect(() => {
+    if (!formOpen) return;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setFormOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [formOpen]);
+
   function blankForm(dateKey: string, ownerId: string, calendarId: string): EventForm {
     const date = dateFromKey(dateKey);
     return {
@@ -494,6 +504,12 @@ function CalendarApp() {
     setSearchOpen(false);
   }
 
+  function openSearch() {
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchOpen(true);
+  }
+
   function openYearMonthPicker() {
     setYearInput(String(visibleDate.getFullYear()));
     setMonthInput(String(visibleDate.getMonth() + 1));
@@ -651,7 +667,7 @@ function CalendarApp() {
             <Text style={styles.muted}>{activeCalendars.length > 1 ? `${activeCalendars.length}개 달력 표시 중` : "일정 달력"}</Text>
           </View>
           <View style={styles.topActions}>
-            <Pressable style={styles.navButton} onPress={() => setSearchOpen(true)}>
+            <Pressable style={styles.navButton} onPress={openSearch}>
               <Feather name="search" size={21} color="#0f172a" />
             </Pressable>
             <Pressable style={styles.navButton} onPress={() => setSettingsOpen(true)}>
@@ -719,13 +735,6 @@ function CalendarApp() {
           </View>
         </View>
 
-        <View style={styles.listHeader}>
-          <Text style={styles.sectionTitle}>{selectedDateKey ? `${selectedDateKey} 일정` : "날짜를 선택하세요"}</Text>
-          <Pressable style={styles.textButton} onPress={() => openCreateForm(selectedDateKey || toDateKey(new Date()))}>
-            <Text style={styles.textButtonLabel}>추가</Text>
-          </Pressable>
-        </View>
-
         <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListContent}>
           {selectedEvents.length === 0 ? <Text style={styles.emptyText}>등록된 일정이 없습니다.</Text> : null}
           {selectedEvents.map((event) => (
@@ -740,6 +749,9 @@ function CalendarApp() {
             </Pressable>
           ))}
         </ScrollView>
+        <Pressable style={styles.fabButton} onPress={() => openCreateForm(selectedDateKey || toDateKey(new Date()))}>
+          <Feather name="plus" size={26} color="#fff" />
+        </Pressable>
       </View>
 
       {renderSearchModal()}
@@ -752,7 +764,7 @@ function CalendarApp() {
 
   function renderSearchModal() {
     return (
-      <Modal visible={searchOpen} animationType="slide" transparent>
+      <Modal visible={searchOpen} animationType="slide" transparent onRequestClose={() => setSearchOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalPanel}>
             <View style={styles.modalContent}>
@@ -840,7 +852,7 @@ function CalendarApp() {
 
   function renderEventModal() {
     return (
-      <Modal visible={formOpen} animationType="slide" transparent>
+      <Modal visible={formOpen} animationType="slide" transparent onRequestClose={() => setFormOpen(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalBackdrop}>
           <ScrollView style={styles.modalPanel} contentContainerStyle={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -1161,13 +1173,28 @@ const styles = StyleSheet.create({
   outsideText: { color: "#475569" },
   eventChip: { borderRadius: 3, paddingHorizontal: 3, fontSize: 9, lineHeight: 12, overflow: "hidden" },
   moreText: { fontSize: 10, color: "#64748b" },
-  listHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a" },
   fieldLabel: { fontSize: 13, fontWeight: "700", color: "#334155" },
   textButton: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center" },
   textButtonLabel: { color: "#0f766e", fontWeight: "700" },
   eventList: { flex: 1 },
-  eventListContent: { gap: 8, paddingBottom: 28 },
+  eventListContent: { gap: 8, paddingBottom: 82 },
+  fabButton: {
+    position: "absolute",
+    right: 12,
+    bottom: 16,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#0f766e",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 5,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+  },
   emptyText: { color: "#64748b", paddingVertical: 20, textAlign: "center" },
   eventRow: { borderWidth: 1, borderLeftWidth: 4, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#fff", padding: 10, gap: 3 },
   eventTitle: { color: "#0f172a", fontSize: 15, fontWeight: "700" },
