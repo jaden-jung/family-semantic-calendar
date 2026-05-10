@@ -265,6 +265,12 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<DisplayEvent[]>([]);
+  const [yearMonthOpen, setYearMonthOpen] = useState(false);
+  const [yearInput, setYearInput] = useState(String(new Date().getFullYear()));
+  const [monthInput, setMonthInput] = useState(String(new Date().getMonth() + 1));
   const [formOpen, setFormOpen] = useState(false);
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
   const [calendarMenuOpen, setCalendarMenuOpen] = useState(false);
@@ -448,6 +454,62 @@ export default function App() {
     setEvents(groups.flat());
   }
 
+  function displayFromEvent(event: EventItem): DisplayEvent {
+    const calendarIndex = calendars.findIndex((calendar) => calendar.id === event.calendar_id);
+    const calendar = calendars.find((item) => item.id === event.calendar_id);
+    const start = new Date(event.starts_at);
+    return {
+      ...event,
+      occurrenceKey: `${event.id}:search`,
+      originalStartsAt: event.starts_at,
+      color: calendarColors[Math.max(0, calendarIndex) % calendarColors.length] || "#0f766e",
+      calendarName: calendar?.name || "캘린더",
+      starts_at: start.toISOString(),
+    };
+  }
+
+  async function runSearch() {
+    const query = searchQuery.trim();
+    if (!query) {
+      Alert.alert("검색어 확인", "검색어를 입력해 주세요.");
+      return;
+    }
+    if (!visibleCalendarIds.length) return;
+    await withLoading(async () => {
+      const groups = await Promise.all(visibleCalendarIds.map((calendarId) => api.searchEvents(calendarId, query, userId)));
+      const unique = new Map<string, EventItem>();
+      groups.flat().forEach((event) => unique.set(event.id, event));
+      setSearchResults(Array.from(unique.values()).map(displayFromEvent));
+    });
+  }
+
+  function goToEventDate(event: DisplayEvent) {
+    const date = new Date(event.starts_at);
+    const key = toDateKey(date);
+    setSelectedDateKey(key);
+    setVisibleDate(new Date(date.getFullYear(), date.getMonth(), 1));
+    setSearchOpen(false);
+  }
+
+  function openYearMonthPicker() {
+    setYearInput(String(visibleDate.getFullYear()));
+    setMonthInput(String(visibleDate.getMonth() + 1));
+    setYearMonthOpen(true);
+  }
+
+  function applyYearMonth() {
+    const year = Number(yearInput);
+    const month = Number(monthInput);
+    if (!Number.isInteger(year) || !Number.isInteger(month) || year < 1900 || year > 2100 || month < 1 || month > 12) {
+      Alert.alert("년월 확인", "연도는 1900~2100, 월은 1~12 사이로 입력해 주세요.");
+      return;
+    }
+    const next = new Date(year, month - 1, 1);
+    setVisibleDate(next);
+    setSelectedDateKey(toDateKey(next));
+    setYearMonthOpen(false);
+  }
+
   function movePeriod(direction: number) {
     if (viewMode === "day") {
       const next = addDays(dateFromKey(selectedDateKey), direction);
@@ -601,16 +663,23 @@ export default function App() {
             <Text style={styles.appTitle}>Family Calendar</Text>
             <Text style={styles.muted}>{activeCalendars.map((calendar) => calendar.name).join(", ")}</Text>
           </View>
-          <Pressable style={styles.navButton} onPress={() => setSettingsOpen(true)}>
-            <Feather name="settings" size={22} color="#0f172a" />
-          </Pressable>
+          <View style={styles.topActions}>
+            <Pressable style={styles.navButton} onPress={() => setSearchOpen(true)}>
+              <Feather name="search" size={21} color="#0f172a" />
+            </Pressable>
+            <Pressable style={styles.navButton} onPress={() => setSettingsOpen(true)}>
+              <Feather name="settings" size={22} color="#0f172a" />
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.monthBar}>
           <Pressable style={styles.navButton} onPress={() => movePeriod(-1)}>
             <Feather name="chevron-left" size={22} color="#0f172a" />
           </Pressable>
-          <Text style={styles.monthTitle}>{viewMode === "month" ? monthLabel(visibleDate) : selectedDateKey}</Text>
+          <Pressable style={styles.monthTitleButton} onPress={openYearMonthPicker}>
+            <Text style={styles.monthTitle}>{viewMode === "month" ? monthLabel(visibleDate) : selectedDateKey}</Text>
+          </Pressable>
           <Pressable style={styles.navButton} onPress={() => movePeriod(1)}>
             <Feather name="chevron-right" size={22} color="#0f172a" />
           </Pressable>
@@ -695,6 +764,8 @@ export default function App() {
       </View>
 
       {renderModeMenu()}
+      {renderSearchModal()}
+      {renderYearMonthModal()}
       {renderEventModal()}
       {renderSettingsModal()}
       {loading ? <LoadingOverlay /> : null}
@@ -720,6 +791,76 @@ export default function App() {
             ))}
           </View>
         </Pressable>
+      </Modal>
+    );
+  }
+
+  function renderSearchModal() {
+    return (
+      <Modal visible={searchOpen} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalPanel}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.sectionTitle}>일정 검색</Text>
+                <Pressable style={styles.navButton} onPress={() => setSearchOpen(false)}>
+                  <Feather name="x" size={22} color="#0f172a" />
+                </Pressable>
+              </View>
+              <View style={styles.searchInputRow}>
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="예: 병원, 어린이날, 카드 식비"
+                  returnKeyType="search"
+                  onSubmitEditing={runSearch}
+                  style={[styles.input, styles.searchInput]}
+                />
+                <Pressable style={styles.navButton} onPress={runSearch}>
+                  <Feather name="search" size={20} color="#0f172a" />
+                </Pressable>
+              </View>
+              <ScrollView style={styles.searchResults} contentContainerStyle={styles.searchResultContent}>
+                {searchResults.length === 0 ? <Text style={styles.emptyText}>검색 결과가 없습니다.</Text> : null}
+                {searchResults.map((event) => (
+                  <Pressable key={`${event.id}:${event.starts_at}`} style={[styles.eventRow, { borderLeftColor: event.color }]} onPress={() => goToEventDate(event)}>
+                    <Text style={styles.eventTitle}>{event.title}</Text>
+                    <Text style={styles.muted}>
+                      {toDateKey(new Date(event.starts_at))} · {timeFromIso(event.starts_at)} · {event.calendarName}
+                    </Text>
+                    {event.body ? <Text numberOfLines={2} style={styles.eventBody}>{event.body}</Text> : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  function renderYearMonthModal() {
+    return (
+      <Modal visible={yearMonthOpen} animationType="fade" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.smallModalPanel}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.sectionTitle}>년월 선택</Text>
+                <Pressable style={styles.navButton} onPress={() => setYearMonthOpen(false)}>
+                  <Feather name="x" size={22} color="#0f172a" />
+                </Pressable>
+              </View>
+              <View style={styles.twoColumnRow}>
+                <TextInput value={yearInput} onChangeText={setYearInput} keyboardType="number-pad" placeholder="YYYY" style={[styles.input, styles.flexInput]} />
+                <TextInput value={monthInput} onChangeText={setMonthInput} keyboardType="number-pad" placeholder="MM" style={[styles.input, styles.flexInput]} />
+              </View>
+              <Pressable style={styles.primaryButton} onPress={applyYearMonth}>
+                <Text style={styles.primaryButtonText}>이동</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </Modal>
     );
   }
@@ -994,6 +1135,7 @@ const styles = StyleSheet.create({
   topBarOnly: { padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  topActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   appTitle: { fontSize: 24, fontWeight: "700", color: "#0f172a" },
   muted: { color: "#64748b", fontSize: 12 },
   input: { minHeight: 44, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 12, paddingVertical: 10, color: "#0f172a", backgroundColor: "#fff" },
@@ -1005,7 +1147,8 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: "#0f172a", fontWeight: "700" },
   dangerButton: { minHeight: 44, borderRadius: 6, backgroundColor: "#b91c1c", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
   monthBar: { flexDirection: "row", alignItems: "center", gap: 8 },
-  monthTitle: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  monthTitleButton: { flex: 1, minHeight: 36, alignItems: "center", justifyContent: "center" },
+  monthTitle: { textAlign: "center", fontSize: 18, fontWeight: "700", color: "#0f172a" },
   navButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#e2e8f0" },
   comboButton: { minHeight: 36, minWidth: 62, borderRadius: 6, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
   comboText: { color: "#0f172a", fontWeight: "700" },
@@ -1041,8 +1184,15 @@ const styles = StyleSheet.create({
   eventBody: { color: "#334155", lineHeight: 19 },
   modalBackdrop: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(15, 23, 42, 0.34)" },
   modalPanel: { backgroundColor: "#f8fafc", borderTopLeftRadius: 8, borderTopRightRadius: 8, maxHeight: "92%" },
+  smallModalPanel: { backgroundColor: "#f8fafc", borderTopLeftRadius: 8, borderTopRightRadius: 8 },
   modalContent: { padding: 16, gap: 10 },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  searchInputRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  searchInput: { flex: 1 },
+  searchResults: { maxHeight: 420 },
+  searchResultContent: { gap: 8, paddingBottom: 12 },
+  twoColumnRow: { flexDirection: "row", gap: 8 },
+  flexInput: { flex: 1 },
   ownerSelect: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, paddingHorizontal: 12, minHeight: 44, backgroundColor: "#fff", flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   ownerSelectText: { color: "#0f172a", fontWeight: "700" },
   ownerMenu: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, backgroundColor: "#fff", overflow: "hidden" },

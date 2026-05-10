@@ -20,12 +20,10 @@ services:
     build:
       context: ./backend
     container_name: family-calendar-backend
+    env_file:
+      - ./backend/.env
     environment:
       DATABASE_URL: postgresql://calendar_app:calendar_app_password@db:5432/family_calendar
-      EMBEDDING_PROVIDER: mock
-      OPENAI_API_KEY: ""
-      OPENAI_EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_DIMENSIONS: "1536"
     ports:
       - "8000:8000"
     depends_on:

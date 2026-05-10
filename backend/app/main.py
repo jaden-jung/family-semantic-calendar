@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.db import close_pool, get_conn, init_db, open_pool
 from app.embeddings import EmbeddingProvider, get_embedding_provider
 from app.payments import parse_card_sms
+from app.search_text import build_event_embedding_text
 from app.schemas import (
     CalendarCreate,
     CalendarJoin,
@@ -42,6 +43,17 @@ def embedding_provider(settings: Annotated[Settings, Depends(get_settings)]) -> 
 
 def vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{value:.8f}" for value in values) + "]"
+
+
+def event_embedding_text_from_payload(payload: EventCreate | EventUpdate) -> str:
+    return build_event_embedding_text(
+        title=payload.title,
+        body=payload.body,
+        location=payload.location,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
+        recurrence_rule=payload.recurrence_rule,
+    )
 
 
 def assert_member(calendar_id, user_id) -> None:
@@ -194,7 +206,7 @@ def list_calendar_members(calendar_id: str, x_user_id: Annotated[str, Header(ali
 @app.post("/events", response_model=EventOut)
 def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, Depends(embedding_provider)]):
     assert_member(payload.calendar_id, payload.created_by)
-    searchable_text = f"{payload.title}\n{payload.body}\n{payload.location}"
+    searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
         row = conn.execute(
@@ -238,7 +250,7 @@ def update_event(
     assert_member(existing["calendar_id"], x_user_id)
     assert_member(existing["calendar_id"], payload.created_by)
 
-    searchable_text = f"{payload.title}\n{payload.body}\n{payload.location}"
+    searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
         row = conn.execute(
@@ -331,7 +343,17 @@ def ingest_card_payment_sms(
 ):
     assert_member(payload.calendar_id, payload.created_by)
     parsed = parse_card_sms(payload.raw_text, payload.received_at)
-    searchable_text = f"{parsed['title']}\n{parsed['body']}\n{parsed['category']}"
+    searchable_text = build_event_embedding_text(
+        title=parsed["title"],
+        body=parsed["body"],
+        location="",
+        starts_at=parsed["starts_at"],
+        source="sms_payment",
+        merchant=parsed["merchant"],
+        amount=parsed["amount"],
+        category=parsed["category"],
+        raw_text=payload.raw_text,
+    )
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
         row = conn.execute(
@@ -380,3 +402,36 @@ def spending_report(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-
             """,
             (calendar_id,),
         ).fetchall()
+
+
+@app.post("/admin/reembed")
+def reembed_all_events(provider: Annotated[EmbeddingProvider, Depends(embedding_provider)]):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, title, body, location, starts_at, ends_at, recurrence_rule, source,
+                   merchant, amount, category, raw_text
+            FROM events
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
+        for row in rows:
+            text = build_event_embedding_text(
+                title=row["title"],
+                body=row["body"],
+                location=row["location"],
+                starts_at=row["starts_at"],
+                ends_at=row["ends_at"],
+                recurrence_rule=row["recurrence_rule"],
+                source=row["source"],
+                merchant=row["merchant"],
+                amount=row["amount"],
+                category=row["category"],
+                raw_text=row["raw_text"],
+            )
+            conn.execute(
+                "UPDATE events SET embedding = %s::vector, updated_at = now() WHERE id = %s",
+                (vector_literal(provider.embed(text)), row["id"]),
+            )
+        conn.commit()
+        return {"status": "ok", "updated": len(rows)}
