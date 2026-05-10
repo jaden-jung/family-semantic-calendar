@@ -45,6 +45,7 @@ type DisplayEvent = EventItem & {
   calendarName: string;
 };
 type EventForm = {
+  calendarId: string;
   title: string;
   body: string;
   location: string;
@@ -251,6 +252,7 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("가족");
+  const [password, setPassword] = useState("");
   const [calendarName, setCalendarName] = useState("우리집 달력");
   const [inviteCode, setInviteCode] = useState("");
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -265,9 +267,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  const [calendarMenuOpen, setCalendarMenuOpen] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<DisplayEvent | null>(null);
-  const [form, setForm] = useState<EventForm>(blankForm(toDateKey(new Date()), ""));
+  const [form, setForm] = useState<EventForm>(blankForm(toDateKey(new Date()), "", ""));
   const [loading, setLoading] = useState(false);
 
   const selectedCalendar = calendars.find((calendar) => calendar.id === selectedCalendarId);
@@ -325,9 +328,10 @@ export default function App() {
     if (selectedCalendarId && userId) void refreshMembers(selectedCalendarId);
   }, [selectedCalendarId, userId]);
 
-  function blankForm(dateKey: string, ownerId: string): EventForm {
+  function blankForm(dateKey: string, ownerId: string, calendarId: string): EventForm {
     const date = dateFromKey(dateKey);
     return {
+      calendarId,
       title: "",
       body: "",
       location: "",
@@ -370,16 +374,32 @@ export default function App() {
   }
 
   async function createUser() {
+    if (!password.trim()) {
+      Alert.alert("비밀번호 확인", "비밀번호를 입력해 주세요.");
+      return;
+    }
     await withLoading(async () => {
-      const user = await api.createUser(displayName.trim() || "가족");
+      const user = await api.createUser(displayName.trim() || "가족", password);
       await writeSavedUser(user);
       setUserId(user.id);
       setDisplayName(user.display_name);
-      const calendar = await api.createCalendar(calendarName.trim() || "우리집 달력", user.id);
-      setCalendars([calendar]);
-      setSelectedCalendarId(calendar.id);
-      setVisibleCalendarIds([calendar.id]);
+      setCalendars([]);
+      setSelectedCalendarId("");
+      setVisibleCalendarIds([]);
       setMembers([user]);
+    });
+  }
+
+  async function signIn() {
+    if (!displayName.trim() || !password.trim()) {
+      Alert.alert("로그인 확인", "사용자 이름과 비밀번호를 입력해 주세요.");
+      return;
+    }
+    await withLoading(async () => {
+      const user = await api.signIn(displayName.trim(), password);
+      await writeSavedUser(user);
+      setUserId(user.id);
+      setDisplayName(user.display_name);
     });
   }
 
@@ -445,9 +465,11 @@ export default function App() {
   }
 
   function openCreateForm(dateKey = selectedDateKey) {
+    const defaultCalendarId = selectedCalendarId || visibleCalendarIds[0] || calendars[0]?.id || "";
     setEditingEvent(null);
-    setForm(blankForm(dateKey, members[0]?.id || userId));
+    setForm(blankForm(dateKey, userId, defaultCalendarId));
     setOwnerMenuOpen(false);
+    setCalendarMenuOpen(false);
     setRepeatOpen(false);
     setFormOpen(true);
   }
@@ -457,7 +479,7 @@ export default function App() {
     const rule = event.recurrence_rule;
     setEditingEvent(event);
     setForm({
-      ...blankForm(toDateKey(originalDate), event.created_by || userId),
+      ...blankForm(toDateKey(originalDate), event.created_by || userId, event.calendar_id),
       title: event.title,
       body: event.body,
       location: event.location || "",
@@ -472,6 +494,7 @@ export default function App() {
       repeatLunar: Boolean(rule?.lunar),
     });
     setOwnerMenuOpen(false);
+    setCalendarMenuOpen(false);
     setRepeatOpen(Boolean(rule));
     setFormOpen(true);
   }
@@ -483,8 +506,8 @@ export default function App() {
       return;
     }
     const normalizedTime = normalizeTime(form.time);
-    if (!selectedCalendarId || !form.title.trim() || !form.ownerId) {
-      Alert.alert("입력 확인", "제목과 사용자 선택은 필수입니다.");
+    if (!form.calendarId || !form.title.trim() || !form.ownerId) {
+      Alert.alert("입력 확인", "달력, 제목, 사용자 선택은 필수입니다.");
       return;
     }
     await withLoading(async () => {
@@ -498,7 +521,7 @@ export default function App() {
         recurrence_rule: buildRule(form),
       };
       if (editingEvent) await api.updateEvent(editingEvent.id, payload, userId);
-      else await api.createEvent({ calendar_id: selectedCalendarId, ...payload });
+      else await api.createEvent({ calendar_id: form.calendarId, ...payload });
       setSelectedDateKey(form.date);
       const savedDate = dateFromKey(form.date);
       setVisibleDate(new Date(savedDate.getFullYear(), savedDate.getMonth(), 1));
@@ -544,7 +567,7 @@ export default function App() {
   }
 
   if (booting) return <LoadingScreen />;
-  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} calendarName={calendarName} setCalendarName={setCalendarName} createUser={createUser} loading={loading} />;
+  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} password={password} setPassword={setPassword} createUser={createUser} signIn={signIn} loading={loading} />;
 
   if (!visibleCalendarIds.length) {
     return (
@@ -712,6 +735,28 @@ export default function App() {
                 <Feather name="x" size={22} color="#0f172a" />
               </Pressable>
             </View>
+            <Text style={styles.fieldLabel}>등록할 달력</Text>
+            <Pressable style={styles.ownerSelect} onPress={() => setCalendarMenuOpen((current) => !current)}>
+              <Text style={styles.ownerSelectText}>{calendars.find((calendar) => calendar.id === form.calendarId)?.name || "달력 선택"}</Text>
+              <Feather name="chevron-down" size={18} color="#0f172a" />
+            </Pressable>
+            {calendarMenuOpen ? (
+              <View style={styles.ownerMenu}>
+                {calendars.map((calendar) => (
+                  <Pressable
+                    key={calendar.id}
+                    style={[styles.ownerMenuItem, form.calendarId === calendar.id && styles.ownerMenuItemActive]}
+                    onPress={() => {
+                      setForm((current) => ({ ...current, calendarId: calendar.id, ownerId: userId }));
+                      setSelectedCalendarId(calendar.id);
+                      setCalendarMenuOpen(false);
+                    }}
+                  >
+                    <Text style={[styles.ownerMenuText, form.calendarId === calendar.id && styles.ownerMenuTextActive]}>{calendar.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
             <TextInput value={form.date} onChangeText={(date) => setForm((current) => ({ ...current, date }))} placeholder="날짜 YYYY-MM-DD" style={styles.input} />
             <TextInput
               value={form.time}
@@ -855,7 +900,9 @@ export default function App() {
                   <Text style={styles.muted}>초대 코드 {calendar.invite_code} · 길게 눌러 복사</Text>
                 </Pressable>
                 <Pressable onPress={() => setSelectedCalendarId(calendar.id)}>
-                  <Text style={styles.textButtonLabel}>기본 등록 달력으로 선택</Text>
+                  <Text style={styles.textButtonLabel}>
+                    {selectedCalendarId === calendar.id ? "기본 등록 달력" : "기본 등록 달력으로 선택"}
+                  </Text>
                 </Pressable>
               </View>
             ))}
@@ -901,16 +948,18 @@ function LoadingOverlay() {
 function SetupScreen({
   displayName,
   setDisplayName,
-  calendarName,
-  setCalendarName,
+  password,
+  setPassword,
   createUser,
+  signIn,
   loading,
 }: {
   displayName: string;
   setDisplayName: (value: string) => void;
-  calendarName: string;
-  setCalendarName: (value: string) => void;
+  password: string;
+  setPassword: (value: string) => void;
   createUser: () => void;
+  signIn: () => void;
   loading: boolean;
 }) {
   return (
@@ -922,10 +971,14 @@ function SetupScreen({
           <Text style={styles.appTitle}>Family Calendar</Text>
         </View>
         <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" style={styles.input} />
-        <TextInput value={calendarName} onChangeText={setCalendarName} placeholder="처음 만들 달력 이름" style={styles.input} />
+        <TextInput value={password} onChangeText={setPassword} placeholder="비밀번호" secureTextEntry style={styles.input} />
+        <Pressable style={styles.secondaryButton} onPress={signIn}>
+          <Feather name="log-in" size={18} color="#0f172a" />
+          <Text style={styles.secondaryButtonText}>기존 사용자 로그인</Text>
+        </Pressable>
         <Pressable style={styles.primaryButton} onPress={createUser}>
           <Feather name="user-plus" size={18} color="#fff" />
-          <Text style={styles.primaryButtonText}>사용자 등록</Text>
+          <Text style={styles.primaryButtonText}>새 사용자 등록</Text>
         </Pressable>
         {loading ? <ActivityIndicator /> : null}
       </View>

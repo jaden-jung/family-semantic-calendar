@@ -21,6 +21,7 @@ from app.schemas import (
     SearchQuery,
     UserCreate,
     UserOut,
+    UserSignIn,
 )
 
 
@@ -64,11 +65,52 @@ def health() -> dict:
 @app.post("/users", response_model=UserOut)
 def create_user(payload: UserCreate):
     with get_conn() as conn:
-        row = conn.execute(
-            "INSERT INTO users (display_name) VALUES (%s) RETURNING id, display_name",
+        existing = conn.execute(
+            "SELECT id, display_name, password_hash FROM users WHERE lower(display_name) = lower(%s) ORDER BY created_at DESC LIMIT 1",
             (payload.display_name,),
         ).fetchone()
+        if existing:
+            if existing["password_hash"] is None:
+                row = conn.execute(
+                    """
+                    UPDATE users
+                    SET password_hash = crypt(%s, gen_salt('bf'))
+                    WHERE id = %s
+                    RETURNING id, display_name
+                    """,
+                    (payload.password, existing["id"]),
+                ).fetchone()
+                conn.commit()
+                return row
+            raise HTTPException(status_code=409, detail="Display name already exists")
+        row = conn.execute(
+            """
+            INSERT INTO users (display_name, password_hash)
+            VALUES (%s, crypt(%s, gen_salt('bf')))
+            RETURNING id, display_name
+            """,
+            (payload.display_name, payload.password),
+        ).fetchone()
         conn.commit()
+        return row
+
+
+@app.post("/auth/sign-in", response_model=UserOut)
+def sign_in(payload: UserSignIn):
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, display_name
+            FROM users
+            WHERE lower(display_name) = lower(%s)
+              AND password_hash = crypt(%s, password_hash)
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (payload.display_name, payload.password),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=401, detail="Invalid display name or password")
         return row
 
 

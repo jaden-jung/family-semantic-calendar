@@ -42,10 +42,12 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS users (
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                 display_name text NOT NULL,
+                password_hash text,
                 created_at timestamptz NOT NULL DEFAULT now()
             )
             """
         )
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS calendars (
