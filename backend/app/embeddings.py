@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 from abc import ABC, abstractmethod
+from functools import lru_cache
 
 from openai import OpenAI
 
@@ -21,10 +22,22 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             raise ValueError("OPENAI_API_KEY is required when EMBEDDING_PROVIDER=openai")
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_embedding_model
+        self.dimensions = settings.embedding_dimensions
 
     def embed(self, text: str) -> list[float]:
         response = self.client.embeddings.create(model=self.model, input=text)
-        return response.data[0].embedding
+        return fit_dimensions(response.data[0].embedding, self.dimensions)
+
+
+class LocalEmbeddingProvider(EmbeddingProvider):
+    def __init__(self, model_name: str, dimensions: int):
+        self.model_name = model_name
+        self.dimensions = dimensions
+
+    def embed(self, text: str) -> list[float]:
+        model = get_sentence_transformer(self.model_name)
+        embedding = model.encode(text, normalize_embeddings=True)
+        return fit_dimensions(embedding.tolist(), self.dimensions)
 
 
 class MockEmbeddingProvider(EmbeddingProvider):
@@ -44,7 +57,25 @@ class MockEmbeddingProvider(EmbeddingProvider):
         return [value / norm for value in vector]
 
 
+def fit_dimensions(values: list[float], dimensions: int) -> list[float]:
+    if len(values) == dimensions:
+        return values
+    if len(values) > dimensions:
+        return values[:dimensions]
+    return values + [0.0] * (dimensions - len(values))
+
+
+@lru_cache(maxsize=4)
+def get_sentence_transformer(model_name: str):
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name)
+
+
 def get_embedding_provider(settings: Settings) -> EmbeddingProvider:
-    if settings.embedding_provider.lower() == "openai":
+    provider = settings.embedding_provider.lower()
+    if provider == "openai":
         return OpenAIEmbeddingProvider(settings)
+    if provider == "local":
+        return LocalEmbeddingProvider(settings.local_embedding_model, settings.embedding_dimensions)
     return MockEmbeddingProvider(settings.embedding_dimensions)

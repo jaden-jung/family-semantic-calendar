@@ -10,7 +10,7 @@ from app.config import Settings, get_settings
 from app.db import close_pool, get_conn, init_db, open_pool
 from app.embeddings import EmbeddingProvider, get_embedding_provider
 from app.payments import parse_card_sms
-from app.search_text import build_event_embedding_text
+from app.search_text import build_event_embedding_text, build_query_embedding_text
 from app.schemas import (
     CalendarCreate,
     CalendarJoin,
@@ -322,7 +322,7 @@ def search_events(
     x_user_id: Annotated[str, Header(alias="X-User-Id")],
 ):
     assert_member(payload.calendar_id, x_user_id)
-    query_embedding = vector_literal(provider.embed(payload.query))
+    query_embedding = vector_literal(provider.embed(build_query_embedding_text(payload.query)))
     with get_conn() as conn:
         return conn.execute(
             """

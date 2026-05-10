@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     embedding_provider: str = "mock"
     openai_api_key: str | None = None
     openai_embedding_model: str = "text-embedding-3-small"
+    local_embedding_model: str = "intfloat/multilingual-e5-small"
     embedding_dimensions: int = 1536
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

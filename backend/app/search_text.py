@@ -71,4 +71,8 @@ def build_event_embedding_text(
         lines.append(f"카테고리: {category}")
     if raw_text:
         lines.append(f"원문: {raw_text}")
-    return "\n".join(line for line in lines if line)
+    return "passage: " + "\n".join(line for line in lines if line)
+
+
+def build_query_embedding_text(query: str) -> str:
+    return f"query: {query.strip()}"
