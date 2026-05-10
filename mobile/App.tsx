@@ -1,5 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
+import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -115,6 +115,22 @@ function ownerName(members: User[], id: string | null) {
   return members.find((member) => member.id === id)?.display_name || "알 수 없음";
 }
 
+async function readSavedUser() {
+  try {
+    return await SecureStore.getItemAsync(savedUserKey);
+  } catch {
+    return null;
+  }
+}
+
+async function writeSavedUser(user: User) {
+  try {
+    await SecureStore.setItemAsync(savedUserKey, JSON.stringify(user));
+  } catch {
+    // SecureStore is only a convenience cache. Account creation should still succeed.
+  }
+}
+
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
@@ -203,7 +219,7 @@ export default function App() {
 
   async function restoreUser() {
     try {
-      const stored = await AsyncStorage.getItem(savedUserKey);
+      const stored = await readSavedUser();
       if (stored) {
         const user = JSON.parse(stored) as User;
         setUserId(user.id);
@@ -228,7 +244,7 @@ export default function App() {
   async function createUser() {
     await withLoading(async () => {
       const user = await api.createUser(displayName.trim() || "가족");
-      await AsyncStorage.setItem(savedUserKey, JSON.stringify(user));
+      await writeSavedUser(user);
       setUserId(user.id);
       setDisplayName(user.display_name);
       const calendar = await api.createCalendar(calendarName.trim() || "우리집 달력", user.id);
