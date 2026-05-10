@@ -38,8 +38,18 @@ class EventCreate(BaseModel):
     created_by: UUID
     title: str = Field(min_length=1, max_length=200)
     body: str = ""
+    location: str = ""
     starts_at: datetime
     ends_at: datetime | None = None
+
+
+class EventUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = ""
+    location: str = ""
+    starts_at: datetime
+    ends_at: datetime | None = None
+    created_by: UUID
 
 
 class PaymentSmsCreate(BaseModel):
@@ -52,8 +62,10 @@ class PaymentSmsCreate(BaseModel):
 class EventOut(BaseModel):
     id: UUID
     calendar_id: UUID
+    created_by: UUID | None
     title: str
     body: str
+    location: str
     starts_at: datetime
     ends_at: datetime | None
     source: str

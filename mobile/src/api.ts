@@ -13,8 +13,10 @@ export type Calendar = {
 export type EventItem = {
   id: string;
   calendar_id: string;
+  created_by: string | null;
   title: string;
   body: string;
+  location: string;
   starts_at: string;
   ends_at: string | null;
   source: "manual" | "sms_payment";
@@ -35,6 +37,16 @@ type CreateEventPayload = {
   created_by: string;
   title: string;
   body: string;
+  location: string;
+  starts_at: string;
+  ends_at?: string | null;
+};
+
+type UpdateEventPayload = {
+  created_by: string;
+  title: string;
+  body: string;
+  location: string;
   starts_at: string;
   ends_at?: string | null;
 };
@@ -76,10 +88,31 @@ export class ApiClient {
     });
   }
 
+  async listCalendarMembers(calendarId: string, userId: string): Promise<User[]> {
+    return this.request(`/calendars/${encodeURIComponent(calendarId)}/members`, {
+      headers: { "X-User-Id": userId },
+    });
+  }
+
   async createEvent(payload: CreateEventPayload): Promise<EventItem> {
     return this.request("/events", {
       method: "POST",
       body: payload,
+    });
+  }
+
+  async updateEvent(eventId: string, payload: UpdateEventPayload, userId: string): Promise<EventItem> {
+    return this.request(`/events/${encodeURIComponent(eventId)}`, {
+      method: "PUT",
+      headers: { "X-User-Id": userId },
+      body: payload,
+    });
+  }
+
+  async deleteEvent(eventId: string, userId: string): Promise<void> {
+    await this.request(`/events/${encodeURIComponent(eventId)}`, {
+      method: "DELETE",
+      headers: { "X-User-Id": userId },
     });
   }
 

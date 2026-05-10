@@ -15,6 +15,7 @@ from app.schemas import (
     CalendarOut,
     EventCreate,
     EventOut,
+    EventUpdate,
     PaymentSmsCreate,
     SearchQuery,
     UserCreate,
@@ -131,25 +132,42 @@ def list_calendars(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
         ).fetchall()
 
 
+@app.get("/calendars/{calendar_id}/members", response_model=list[UserOut])
+def list_calendar_members(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+    assert_member(calendar_id, x_user_id)
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT u.id, u.display_name
+            FROM users u
+            JOIN calendar_members cm ON cm.user_id = u.id
+            WHERE cm.calendar_id = %s
+            ORDER BY cm.created_at ASC
+            """,
+            (calendar_id,),
+        ).fetchall()
+
+
 @app.post("/events", response_model=EventOut)
 def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, Depends(embedding_provider)]):
     assert_member(payload.calendar_id, payload.created_by)
-    searchable_text = f"{payload.title}\n{payload.body}"
+    searchable_text = f"{payload.title}\n{payload.body}\n{payload.location}"
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
         row = conn.execute(
             """
             INSERT INTO events (
-                calendar_id, created_by, title, body, starts_at, ends_at, embedding
+                calendar_id, created_by, title, body, location, starts_at, ends_at, embedding
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s::vector)
-            RETURNING id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
             """,
             (
                 payload.calendar_id,
                 payload.created_by,
                 payload.title,
                 payload.body,
+                payload.location,
                 payload.starts_at,
                 payload.ends_at,
                 embedding,
@@ -159,13 +177,77 @@ def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, De
         return row
 
 
+@app.put("/events/{event_id}", response_model=EventOut)
+def update_event(
+    event_id: str,
+    payload: EventUpdate,
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
+):
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT calendar_id FROM events WHERE id = %s",
+            (event_id,),
+        ).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Event not found")
+    assert_member(existing["calendar_id"], x_user_id)
+    assert_member(existing["calendar_id"], payload.created_by)
+
+    searchable_text = f"{payload.title}\n{payload.body}\n{payload.location}"
+    embedding = vector_literal(provider.embed(searchable_text))
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            UPDATE events
+            SET created_by = %s,
+                title = %s,
+                body = %s,
+                location = %s,
+                starts_at = %s,
+                ends_at = %s,
+                embedding = %s::vector,
+                updated_at = now()
+            WHERE id = %s
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
+            """,
+            (
+                payload.created_by,
+                payload.title,
+                payload.body,
+                payload.location,
+                payload.starts_at,
+                payload.ends_at,
+                embedding,
+                event_id,
+            ),
+        ).fetchone()
+        conn.commit()
+        return row
+
+
+@app.delete("/events/{event_id}")
+def delete_event(event_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT calendar_id FROM events WHERE id = %s",
+            (event_id,),
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Event not found")
+        assert_member(existing["calendar_id"], x_user_id)
+        conn.execute("DELETE FROM events WHERE id = %s", (event_id,))
+        conn.commit()
+        return {"status": "deleted"}
+
+
 @app.get("/events", response_model=list[EventOut])
 def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
     assert_member(calendar_id, x_user_id)
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
             FROM events
             WHERE calendar_id = %s
             ORDER BY starts_at DESC
@@ -186,7 +268,7 @@ def search_events(
     with get_conn() as conn:
         return conn.execute(
             """
-            SELECT id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
             FROM events
             WHERE calendar_id = %s
             ORDER BY embedding <=> %s::vector
@@ -213,7 +295,7 @@ def ingest_card_payment_sms(
                 merchant, amount, category, raw_text, embedding
             )
             VALUES (%s, %s, %s, %s, %s, 'sms_payment', %s, %s, %s, %s, %s::vector)
-            RETURNING id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, source, merchant, amount, category
             """,
             (
                 payload.calendar_id,

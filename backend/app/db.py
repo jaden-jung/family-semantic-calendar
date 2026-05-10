@@ -76,6 +76,7 @@ def init_db() -> None:
                 created_by uuid REFERENCES users(id) ON DELETE SET NULL,
                 title text NOT NULL,
                 body text NOT NULL DEFAULT '',
+                location text NOT NULL DEFAULT '',
                 starts_at timestamptz NOT NULL,
                 ends_at timestamptz,
                 source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'sms_payment')),
@@ -89,6 +90,7 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("ALTER TABLE events ADD COLUMN IF NOT EXISTS location text NOT NULL DEFAULT ''")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS events_calendar_starts_at_idx
