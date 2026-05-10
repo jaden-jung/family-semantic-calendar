@@ -2,12 +2,12 @@
   "expo": {
     "name": "Family Calendar",
     "slug": "family-semantic-calendar",
-    "version": "0.1.5",
+    "version": "0.1.6",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.familysemanticcalendar.app",
-      "versionCode": 6,
+      "versionCode": 7,
       "usesCleartextTraffic": true,
       "permissions": [
         "android.permission.INTERNET",

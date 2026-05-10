@@ -1178,7 +1178,7 @@ const styles = StyleSheet.create({
   textButton: { minHeight: 32, paddingHorizontal: 12, justifyContent: "center" },
   textButtonLabel: { color: "#0f766e", fontWeight: "700" },
   eventList: { flex: 1 },
-  eventListContent: { gap: 8, paddingBottom: 82 },
+  eventListContent: { gap: 8, paddingBottom: 48 },
   fabButton: {
     position: "absolute",
     right: 12,
