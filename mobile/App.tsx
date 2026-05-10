@@ -19,7 +19,7 @@ import {
 
 import { ApiClient, Calendar, EventItem, RecurrenceRule, User } from "./src/api";
 
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "http://100.68.67.109:8000";
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "https://desktop-lnu5cl7.tail96fe59.ts.net";
 const api = new ApiClient(apiBaseUrl);
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const savedUserKey = "family-calendar:user";
