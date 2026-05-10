@@ -1,0 +1,20 @@
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    database_url: str = "postgresql://calendar_app:calendar_app_password@localhost:5432/family_calendar"
+    embedding_provider: str = "mock"
+    openai_api_key: str | None = None
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

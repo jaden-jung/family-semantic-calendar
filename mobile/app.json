@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Family Calendar",
+    "slug": "family-semantic-calendar",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "com.familysemanticcalendar.app",
+      "permissions": []
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:8000"
+    }
+  }
+}
+

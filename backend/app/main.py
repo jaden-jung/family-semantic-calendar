@@ -1,0 +1,254 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, HTTPException
+
+from app.config import Settings, get_settings
+from app.db import close_pool, get_conn, init_db, open_pool
+from app.embeddings import EmbeddingProvider, get_embedding_provider
+from app.payments import parse_card_sms
+from app.schemas import (
+    CalendarCreate,
+    CalendarJoin,
+    CalendarOut,
+    EventCreate,
+    EventOut,
+    PaymentSmsCreate,
+    SearchQuery,
+    UserCreate,
+    UserOut,
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    open_pool()
+    init_db()
+    yield
+    close_pool()
+
+
+app = FastAPI(title="Family Semantic Calendar API", lifespan=lifespan)
+
+
+def embedding_provider(settings: Annotated[Settings, Depends(get_settings)]) -> EmbeddingProvider:
+    return get_embedding_provider(settings)
+
+
+def vector_literal(values: list[float]) -> str:
+    return "[" + ",".join(f"{value:.8f}" for value in values) + "]"
+
+
+def assert_member(calendar_id, user_id) -> None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM calendar_members
+            WHERE calendar_id = %s AND user_id = %s
+            """,
+            (calendar_id, user_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=403, detail="User is not a member of this calendar")
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.post("/users", response_model=UserOut)
+def create_user(payload: UserCreate):
+    with get_conn() as conn:
+        row = conn.execute(
+            "INSERT INTO users (display_name) VALUES (%s) RETURNING id, display_name",
+            (payload.display_name,),
+        ).fetchone()
+        conn.commit()
+        return row
+
+
+@app.post("/calendars", response_model=CalendarOut)
+def create_calendar(payload: CalendarCreate):
+    with get_conn() as conn:
+        user = conn.execute("SELECT 1 FROM users WHERE id = %s", (payload.owner_user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Owner user not found")
+        calendar = conn.execute(
+            """
+            INSERT INTO calendars (name, owner_user_id)
+            VALUES (%s, %s)
+            RETURNING id, name, invite_code
+            """,
+            (payload.name, payload.owner_user_id),
+        ).fetchone()
+        conn.execute(
+            """
+            INSERT INTO calendar_members (calendar_id, user_id, role)
+            VALUES (%s, %s, 'owner')
+            """,
+            (calendar["id"], payload.owner_user_id),
+        )
+        conn.commit()
+        return {**calendar, "role": "owner"}
+
+
+@app.post("/calendars/join", response_model=CalendarOut)
+def join_calendar(payload: CalendarJoin):
+    with get_conn() as conn:
+        calendar = conn.execute(
+            "SELECT id, name, invite_code FROM calendars WHERE invite_code = %s",
+            (payload.invite_code,),
+        ).fetchone()
+        if not calendar:
+            raise HTTPException(status_code=404, detail="Invite code not found")
+        conn.execute(
+            """
+            INSERT INTO calendar_members (calendar_id, user_id, role)
+            VALUES (%s, %s, 'member')
+            ON CONFLICT (calendar_id, user_id) DO NOTHING
+            """,
+            (calendar["id"], payload.user_id),
+        )
+        conn.commit()
+        return {**calendar, "role": "member"}
+
+
+@app.get("/calendars", response_model=list[CalendarOut])
+def list_calendars(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT c.id, c.name, c.invite_code, cm.role
+            FROM calendars c
+            JOIN calendar_members cm ON cm.calendar_id = c.id
+            WHERE cm.user_id = %s
+            ORDER BY c.created_at DESC
+            """,
+            (x_user_id,),
+        ).fetchall()
+
+
+@app.post("/events", response_model=EventOut)
+def create_event(payload: EventCreate, provider: Annotated[EmbeddingProvider, Depends(embedding_provider)]):
+    assert_member(payload.calendar_id, payload.created_by)
+    searchable_text = f"{payload.title}\n{payload.body}"
+    embedding = vector_literal(provider.embed(searchable_text))
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO events (
+                calendar_id, created_by, title, body, starts_at, ends_at, embedding
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s::vector)
+            RETURNING id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            """,
+            (
+                payload.calendar_id,
+                payload.created_by,
+                payload.title,
+                payload.body,
+                payload.starts_at,
+                payload.ends_at,
+                embedding,
+            ),
+        ).fetchone()
+        conn.commit()
+        return row
+
+
+@app.get("/events", response_model=list[EventOut])
+def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+    assert_member(calendar_id, x_user_id)
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            FROM events
+            WHERE calendar_id = %s
+            ORDER BY starts_at DESC
+            LIMIT 200
+            """,
+            (calendar_id,),
+        ).fetchall()
+
+
+@app.post("/events/search", response_model=list[EventOut])
+def search_events(
+    payload: SearchQuery,
+    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
+    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+):
+    assert_member(payload.calendar_id, x_user_id)
+    query_embedding = vector_literal(provider.embed(payload.query))
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            FROM events
+            WHERE calendar_id = %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (payload.calendar_id, query_embedding, payload.limit),
+        ).fetchall()
+
+
+@app.post("/sms/card-payments", response_model=EventOut)
+def ingest_card_payment_sms(
+    payload: PaymentSmsCreate,
+    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
+):
+    assert_member(payload.calendar_id, payload.created_by)
+    parsed = parse_card_sms(payload.raw_text, payload.received_at)
+    searchable_text = f"{parsed['title']}\n{parsed['body']}\n{parsed['category']}"
+    embedding = vector_literal(provider.embed(searchable_text))
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO events (
+                calendar_id, created_by, title, body, starts_at, source,
+                merchant, amount, category, raw_text, embedding
+            )
+            VALUES (%s, %s, %s, %s, %s, 'sms_payment', %s, %s, %s, %s, %s::vector)
+            RETURNING id, calendar_id, title, body, starts_at, ends_at, source, merchant, amount, category
+            """,
+            (
+                payload.calendar_id,
+                payload.created_by,
+                parsed["title"],
+                parsed["body"],
+                parsed["starts_at"],
+                parsed["merchant"],
+                parsed["amount"],
+                parsed["category"],
+                payload.raw_text,
+                embedding,
+            ),
+        ).fetchone()
+        conn.commit()
+        return row
+
+
+@app.get("/reports/spending")
+def spending_report(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+    assert_member(calendar_id, x_user_id)
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT
+                date_trunc('month', starts_at)::date AS month,
+                category,
+                sum(amount) AS total_amount,
+                count(*) AS transaction_count
+            FROM events
+            WHERE calendar_id = %s
+              AND source = 'sms_payment'
+              AND amount IS NOT NULL
+            GROUP BY month, category
+            ORDER BY month DESC, total_amount DESC
+            """,
+            (calendar_id,),
+        ).fetchall()
