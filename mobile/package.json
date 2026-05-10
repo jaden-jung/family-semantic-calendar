@@ -11,6 +11,7 @@
   "dependencies": {
     "@expo/vector-icons": "^14.0.4",
     "expo": "~52.0.25",
+    "expo-asset": "~11.0.5",
     "expo-status-bar": "~2.0.1",
     "react": "18.3.1",
     "react-native": "0.76.6",
@@ -21,4 +22,3 @@
     "typescript": "^5.3.3"
   }
 }
-
