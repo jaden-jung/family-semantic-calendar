@@ -19,7 +19,8 @@ import {
 
 import { ApiClient, Calendar, EventItem, RecurrenceRule, User } from "./src/api";
 
-const api = new ApiClient(process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:8000");
+const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "http://100.68.67.109:8000";
+const api = new ApiClient(apiBaseUrl);
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const savedUserKey = "family-calendar:user";
 const calendarColors = ["#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c", "#15803d"];
@@ -1072,6 +1073,7 @@ function SetupScreen({
           <Feather name="user-plus" size={18} color="#fff" />
           <Text style={styles.primaryButtonText}>새 사용자 등록</Text>
         </Pressable>
+        <Text style={styles.muted}>API {apiBaseUrl}</Text>
         {loading ? <ActivityIndicator /> : null}
       </View>
     </SafeAreaView>

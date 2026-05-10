@@ -2,17 +2,17 @@
   "expo": {
     "name": "Family Calendar",
     "slug": "family-semantic-calendar",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "android": {
       "package": "com.familysemanticcalendar.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "usesCleartextTraffic": true,
       "permissions": []
     },
     "extra": {
-      "apiBaseUrl": "http://localhost:8000",
+      "apiBaseUrl": "http://100.68.67.109:8000",
       "eas": {
         "projectId": "9385becd-c604-4b8f-ab02-1ccb09c7ae70"
       }
