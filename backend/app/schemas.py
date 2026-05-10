@@ -26,6 +26,7 @@ class UserOut(BaseModel):
 class CalendarCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     owner_user_id: UUID
+    calendar_type: str = Field(default="schedule", pattern="^(schedule|ledger)$")
 
 
 class CalendarJoin(BaseModel):
@@ -36,6 +37,7 @@ class CalendarJoin(BaseModel):
 class CalendarOut(BaseModel):
     id: UUID
     name: str
+    calendar_type: str = "schedule"
     invite_code: str
     role: str | None = None
 
@@ -49,6 +51,10 @@ class EventCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime | None = None
     recurrence_rule: dict[str, Any] | None = None
+    merchant: str | None = None
+    amount: Decimal | None = None
+    category: str | None = None
+    payment_method: str | None = None
 
 
 class EventUpdate(BaseModel):
@@ -59,6 +65,10 @@ class EventUpdate(BaseModel):
     ends_at: datetime | None = None
     created_by: UUID
     recurrence_rule: dict[str, Any] | None = None
+    merchant: str | None = None
+    amount: Decimal | None = None
+    category: str | None = None
+    payment_method: str | None = None
 
 
 class PaymentSmsCreate(BaseModel):
@@ -82,6 +92,26 @@ class EventOut(BaseModel):
     merchant: str | None
     amount: Decimal | None
     category: str | None
+    payment_method: str | None = None
+
+
+class SmsPatternCreate(BaseModel):
+    calendar_id: UUID
+    sender_phone: str = Field(min_length=1, max_length=40)
+    sample_message: str = ""
+    amount_marker: str = ""
+    merchant_marker: str = ""
+    datetime_marker: str = ""
+
+
+class SmsPatternOut(BaseModel):
+    id: UUID
+    calendar_id: UUID
+    sender_phone: str
+    sample_message: str
+    amount_marker: str
+    merchant_marker: str
+    datetime_marker: str
 
 
 class SearchQuery(BaseModel):

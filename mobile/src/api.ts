@@ -6,6 +6,7 @@ export type User = {
 export type Calendar = {
   id: string;
   name: string;
+  calendar_type: "schedule" | "ledger";
   invite_code: string;
   role?: string;
 };
@@ -33,6 +34,7 @@ export type EventItem = {
   merchant: string | null;
   amount: string | null;
   category: string | null;
+  payment_method: string | null;
 };
 
 export type SpendingRow = {
@@ -51,6 +53,10 @@ type CreateEventPayload = {
   starts_at: string;
   ends_at?: string | null;
   recurrence_rule?: RecurrenceRule | null;
+  merchant?: string | null;
+  amount?: string | null;
+  category?: string | null;
+  payment_method?: string | null;
 };
 
 type UpdateEventPayload = {
@@ -61,6 +67,10 @@ type UpdateEventPayload = {
   starts_at: string;
   ends_at?: string | null;
   recurrence_rule?: RecurrenceRule | null;
+  merchant?: string | null;
+  amount?: string | null;
+  category?: string | null;
+  payment_method?: string | null;
 };
 
 type PaymentSmsPayload = {
@@ -69,6 +79,18 @@ type PaymentSmsPayload = {
   raw_text: string;
   received_at: string;
 };
+
+export type SmsPattern = {
+  id: string;
+  calendar_id: string;
+  sender_phone: string;
+  sample_message: string;
+  amount_marker: string;
+  merchant_marker: string;
+  datetime_marker: string;
+};
+
+type SmsPatternPayload = Omit<SmsPattern, "id">;
 
 export class ApiClient {
   constructor(private readonly baseUrl: string) {}
@@ -87,10 +109,10 @@ export class ApiClient {
     });
   }
 
-  async createCalendar(name: string, ownerUserId: string): Promise<Calendar> {
+  async createCalendar(name: string, ownerUserId: string, calendarType: "schedule" | "ledger"): Promise<Calendar> {
     return this.request("/calendars", {
       method: "POST",
-      body: { name, owner_user_id: ownerUserId },
+      body: { name, owner_user_id: ownerUserId, calendar_type: calendarType },
     });
   }
 
@@ -158,6 +180,27 @@ export class ApiClient {
 
   async spendingReport(calendarId: string, userId: string): Promise<SpendingRow[]> {
     return this.request(`/reports/spending?calendar_id=${encodeURIComponent(calendarId)}`, {
+      headers: { "X-User-Id": userId },
+    });
+  }
+
+  async listSmsPatterns(calendarId: string, userId: string): Promise<SmsPattern[]> {
+    return this.request(`/sms/patterns?calendar_id=${encodeURIComponent(calendarId)}`, {
+      headers: { "X-User-Id": userId },
+    });
+  }
+
+  async createSmsPattern(payload: SmsPatternPayload, userId: string): Promise<SmsPattern> {
+    return this.request("/sms/patterns", {
+      method: "POST",
+      headers: { "X-User-Id": userId },
+      body: payload,
+    });
+  }
+
+  async deleteSmsPattern(patternId: string, userId: string): Promise<void> {
+    await this.request(`/sms/patterns/${encodeURIComponent(patternId)}`, {
+      method: "DELETE",
       headers: { "X-User-Id": userId },
     });
   }

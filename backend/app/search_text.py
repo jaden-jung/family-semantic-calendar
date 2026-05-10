@@ -48,6 +48,7 @@ def build_event_embedding_text(
     merchant: str | None = None,
     amount: Decimal | None = None,
     category: str | None = None,
+    payment_method: str | None = None,
     raw_text: str | None = None,
 ) -> str:
     date_text, month_text, time_text = format_dt(starts_at)
@@ -69,6 +70,8 @@ def build_event_embedding_text(
         lines.append(f"금액: {amount}원")
     if category:
         lines.append(f"카테고리: {category}")
+    if payment_method:
+        lines.append(f"결제방식: {payment_method}")
     if raw_text:
         lines.append(f"원문: {raw_text}")
     return "passage: " + "\n".join(line for line in lines if line)
