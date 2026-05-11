@@ -44,6 +44,14 @@ def vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{value:.8f}" for value in values) + "]"
 
 
+def normalize_display_name(value: str) -> str:
+    return " ".join(value.split()).strip()
+
+
+def compact_display_name(value: str) -> str:
+    return "".join(value.split()).casefold()
+
+
 def event_embedding_text_from_payload(payload: EventCreate | EventUpdate) -> str:
     return build_event_embedding_text(
         title=payload.title,
@@ -75,12 +83,15 @@ def health() -> dict:
 
 @app.post("/users", response_model=UserOut)
 def create_user(payload: UserCreate):
-    password = payload.password or payload.display_name
+    display_name = normalize_display_name(payload.display_name)
+    if not display_name:
+        raise HTTPException(status_code=422, detail="Display name is required")
+    password = payload.password or display_name
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT id, display_name, password_hash FROM users WHERE lower(display_name) = lower(%s) ORDER BY created_at DESC LIMIT 1",
-            (payload.display_name,),
-        ).fetchone()
+        existing_users = conn.execute(
+            "SELECT id, display_name, password_hash FROM users ORDER BY created_at DESC",
+        ).fetchall()
+        existing = next((user for user in existing_users if compact_display_name(user["display_name"]) == compact_display_name(display_name)), None)
         if existing:
             if existing["password_hash"] is None:
                 row = conn.execute(
@@ -101,7 +112,7 @@ def create_user(payload: UserCreate):
             VALUES (%s, crypt(%s, gen_salt('bf')))
             RETURNING id, display_name
             """,
-            (payload.display_name, password),
+            (display_name, password),
         ).fetchone()
         conn.commit()
         return row
@@ -109,19 +120,18 @@ def create_user(payload: UserCreate):
 
 @app.post("/auth/sign-in", response_model=UserOut)
 def sign_in(payload: UserSignIn):
-    display_name = payload.display_name.strip()
+    display_name = normalize_display_name(payload.display_name)
+    compact_name = compact_display_name(display_name)
     with get_conn() as conn:
         if not payload.password:
-            row = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT id, display_name
                 FROM users
-                WHERE lower(display_name) = lower(%s)
                 ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                (display_name,),
-            ).fetchone()
+                """
+            ).fetchall()
+            row = next((user for user in rows if compact_display_name(user["display_name"]) == compact_name), None)
             if not row:
                 raise HTTPException(status_code=404, detail="User not found")
             return row

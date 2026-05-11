@@ -26,6 +26,7 @@ import { ApiClient, Calendar, EventItem, RecurrenceRule, SearchEventItem, User }
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "https://desktop-lnu5cl7.tail96fe59.ts.net";
 const api = new ApiClient(apiBaseUrl);
+const appVersion = "0.1.15";
 const dayLabels = ["일", "월", "화", "수", "목", "금", "토"];
 const placeholderColor = "#94a3b8";
 const allOwnerId = "__all__";
@@ -409,8 +410,8 @@ function CalendarApp() {
   }, []);
 
   useEffect(() => {
-    if (!userId) void refreshSignInUsers();
-  }, [userId]);
+    if (!booting && !userId) void refreshSignInUsers();
+  }, [booting, userId]);
 
   useEffect(() => {
     if (userId) void refreshCalendars();
@@ -759,7 +760,7 @@ function CalendarApp() {
   }
 
   if (booting) return <LoadingScreen />;
-  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} users={signInUsers} createUser={createUser} signIn={signIn} loading={loading} />;
+  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} users={signInUsers} refreshUsers={refreshSignInUsers} createUser={createUser} signIn={signIn} loading={loading} />;
 
   if (!visibleCalendarIds.length) {
     return (
@@ -1274,6 +1275,7 @@ function SetupScreen({
   displayName,
   setDisplayName,
   users,
+  refreshUsers,
   createUser,
   signIn,
   loading,
@@ -1281,6 +1283,7 @@ function SetupScreen({
   displayName: string;
   setDisplayName: (value: string) => void;
   users: User[];
+  refreshUsers: () => void;
   createUser: () => void;
   signIn: () => void;
   loading: boolean;
@@ -1302,7 +1305,12 @@ function SetupScreen({
               </Pressable>
             ))}
           </View>
-        ) : null}
+        ) : (
+          <Pressable style={styles.ghostButton} onPress={refreshUsers}>
+            <Feather name="refresh-cw" size={16} color="#0f766e" />
+            <Text style={styles.ghostButtonText}>기존 사용자 목록 불러오기</Text>
+          </Pressable>
+        )}
         <Pressable style={styles.secondaryButton} onPress={signIn}>
           <Feather name="log-in" size={18} color="#0f172a" />
           <Text style={styles.secondaryButtonText}>기존 사용자 로그인</Text>
@@ -1311,7 +1319,7 @@ function SetupScreen({
           <Feather name="user-plus" size={18} color="#fff" />
           <Text style={styles.primaryButtonText}>새 사용자 등록</Text>
         </Pressable>
-        <Text style={styles.muted}>API {apiBaseUrl}</Text>
+        <Text style={styles.muted}>API {apiBaseUrl} · 앱 v{appVersion}</Text>
         {loading ? <ActivityIndicator /> : null}
       </View>
     </SafeAreaView>
@@ -1327,6 +1335,8 @@ const styles = StyleSheet.create({
   userChoiceActive: { backgroundColor: "#0f766e", borderColor: "#0f766e" },
   userChoiceText: { color: "#334155", fontWeight: "700" },
   userChoiceTextActive: { color: "#fff" },
+  ghostButton: { minHeight: 40, borderRadius: 6, borderWidth: 1, borderColor: "#99f6e4", backgroundColor: "#f0fdfa", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8 },
+  ghostButtonText: { color: "#0f766e", fontWeight: "700" },
   centerPanel: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 22 },
   topBarOnly: { padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
