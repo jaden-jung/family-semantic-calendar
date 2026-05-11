@@ -338,6 +338,7 @@ function CalendarApp() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [signInUsers, setSignInUsers] = useState<User[]>([]);
   const [calendarName, setCalendarName] = useState("우리집 달력");
   const [inviteCode, setInviteCode] = useState("");
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -406,6 +407,10 @@ function CalendarApp() {
   useEffect(() => {
     void restoreUser();
   }, []);
+
+  useEffect(() => {
+    if (!userId) void refreshSignInUsers();
+  }, [userId]);
 
   useEffect(() => {
     if (userId) void refreshCalendars();
@@ -554,6 +559,14 @@ function CalendarApp() {
   async function refreshMembers() {
     const items = await api.listUsers(userId);
     setMembers(items);
+  }
+
+  async function refreshSignInUsers() {
+    try {
+      setSignInUsers(await api.listSignInUsers());
+    } catch {
+      setSignInUsers([]);
+    }
   }
 
   async function refreshEvents(calendarIds: string[]) {
@@ -746,7 +759,7 @@ function CalendarApp() {
   }
 
   if (booting) return <LoadingScreen />;
-  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} createUser={createUser} signIn={signIn} loading={loading} />;
+  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} users={signInUsers} createUser={createUser} signIn={signIn} loading={loading} />;
 
   if (!visibleCalendarIds.length) {
     return (
@@ -1260,12 +1273,14 @@ function LoadingOverlay() {
 function SetupScreen({
   displayName,
   setDisplayName,
+  users,
   createUser,
   signIn,
   loading,
 }: {
   displayName: string;
   setDisplayName: (value: string) => void;
+  users: User[];
   createUser: () => void;
   signIn: () => void;
   loading: boolean;
@@ -1279,6 +1294,15 @@ function SetupScreen({
           <Text style={styles.appTitle}>Family Calendar</Text>
         </View>
         <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" placeholderTextColor={placeholderColor} style={styles.input} />
+        {users.length ? (
+          <View style={styles.userChoiceRow}>
+            {users.map((user) => (
+              <Pressable key={user.id} style={[styles.userChoice, displayName === user.display_name && styles.userChoiceActive]} onPress={() => setDisplayName(user.display_name)}>
+                <Text style={[styles.userChoiceText, displayName === user.display_name && styles.userChoiceTextActive]}>{user.display_name}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         <Pressable style={styles.secondaryButton} onPress={signIn}>
           <Feather name="log-in" size={18} color="#0f172a" />
           <Text style={styles.secondaryButtonText}>기존 사용자 로그인</Text>
@@ -1298,6 +1322,11 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f7faf9", paddingTop: 14 },
   screen: { flex: 1, paddingHorizontal: 8, paddingBottom: 14, paddingTop: 8, gap: 10 },
   setup: { flex: 1, justifyContent: "center", padding: 22, gap: 12 },
+  userChoiceRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  userChoice: { minHeight: 36, borderRadius: 18, borderWidth: 1, borderColor: "#cbd5e1", backgroundColor: "#fff", paddingHorizontal: 14, alignItems: "center", justifyContent: "center" },
+  userChoiceActive: { backgroundColor: "#0f766e", borderColor: "#0f766e" },
+  userChoiceText: { color: "#334155", fontWeight: "700" },
+  userChoiceTextActive: { color: "#fff" },
   centerPanel: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 22 },
   topBarOnly: { padding: 14, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },

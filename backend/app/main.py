@@ -109,6 +109,7 @@ def create_user(payload: UserCreate):
 
 @app.post("/auth/sign-in", response_model=UserOut)
 def sign_in(payload: UserSignIn):
+    display_name = payload.display_name.strip()
     with get_conn() as conn:
         if not payload.password:
             row = conn.execute(
@@ -119,7 +120,7 @@ def sign_in(payload: UserSignIn):
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                (payload.display_name,),
+                (display_name,),
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="User not found")
@@ -133,11 +134,23 @@ def sign_in(payload: UserSignIn):
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            (payload.display_name, payload.password),
+            (display_name, payload.password),
         ).fetchone()
         if not row:
             raise HTTPException(status_code=401, detail="Invalid display name or password")
         return row
+
+
+@app.get("/auth/users", response_model=list[UserOut])
+def list_sign_in_users():
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT id, display_name
+            FROM users
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
 
 
 @app.get("/users", response_model=list[UserOut])

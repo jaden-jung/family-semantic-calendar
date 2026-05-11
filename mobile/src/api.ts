@@ -75,6 +75,10 @@ export class ApiClient {
     });
   }
 
+  async listSignInUsers(): Promise<User[]> {
+    return this.request("/auth/users");
+  }
+
   async listUsers(userId: string): Promise<User[]> {
     return this.request("/users", {
       headers: { "X-User-Id": userId },
