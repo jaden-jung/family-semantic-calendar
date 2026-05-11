@@ -20,7 +20,7 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
-import { ApiClient, Calendar, EventItem, RecurrenceRule, User } from "./src/api";
+import { ApiClient, Calendar, EventItem, RecurrenceRule, SearchEventItem, User } from "./src/api";
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "https://desktop-lnu5cl7.tail96fe59.ts.net";
 const api = new ApiClient(apiBaseUrl);
@@ -46,8 +46,13 @@ type MonthMode = "day" | "weekday";
 type DisplayEvent = EventItem & {
   occurrenceKey: string;
   originalStartsAt: string;
+  isRangeStart: boolean;
+  isRangeEnd: boolean;
+  isRangeMiddle: boolean;
   color: string;
   calendarName: string;
+  distance?: number;
+  similarity?: number;
 };
 type EventForm = {
   calendarId: string;
@@ -55,6 +60,8 @@ type EventForm = {
   body: string;
   location: string;
   date: string;
+  isPeriod: boolean;
+  endDate: string;
   time: string;
   ownerId: string;
   repeatEnabled: boolean;
@@ -129,6 +136,14 @@ function combineDateTime(date: string, time: string) {
   return timestamp.toISOString();
 }
 
+function combineDateEnd(date: string, time: string) {
+  const normalized = normalizeTime(time);
+  if (normalized === null) return null;
+  const timestamp = new Date(`${date}T${normalized || "23:59"}:59`);
+  if (Number.isNaN(timestamp.getTime())) return null;
+  return timestamp.toISOString();
+}
+
 function timeFromIso(value: string) {
   const date = new Date(value);
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
@@ -149,6 +164,10 @@ function ownerName(members: User[], id: string | null) {
 
 function faintColor(hex: string) {
   return /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}1f` : "#e8f3f8";
+}
+
+function sameDate(a: Date, b: Date) {
+  return toDateKey(a) === toDateKey(b);
 }
 
 function nthWeekdayDate(year: number, month: number, weekday: number, weekOfMonth: number) {
@@ -182,15 +201,20 @@ function expandEvents(events: EventItem[], calendars: Calendar[], rangeStart: Da
   const displays: DisplayEvent[] = [];
   const calendarInfo = new Map(calendars.map((calendar, index) => [calendar.id, { name: calendar.name, color: calendarColors[index % calendarColors.length] }]));
 
-  function pushEvent(event: EventItem, startsAt: Date) {
+  function pushEvent(event: EventItem, startsAt: Date, rangeStartDate = startsAt, rangeEndDate = startsAt) {
     if (startsAt < new Date(event.starts_at)) return;
     if (startsAt < rangeStart || startsAt > rangeEnd) return;
     const info = calendarInfo.get(event.calendar_id) || { name: "달력", color: "#0f766e" };
+    const isRangeStart = sameDate(startsAt, rangeStartDate);
+    const isRangeEnd = sameDate(startsAt, rangeEndDate);
     displays.push({
       ...event,
       starts_at: startsAt.toISOString(),
       occurrenceKey: `${event.id}:${toDateKey(startsAt)}`,
       originalStartsAt: event.starts_at,
+      isRangeStart,
+      isRangeEnd,
+      isRangeMiddle: !isRangeStart && !isRangeEnd,
       color: info.color,
       calendarName: info.name,
     });
@@ -198,9 +222,18 @@ function expandEvents(events: EventItem[], calendars: Calendar[], rangeStart: Da
 
   events.forEach((event) => {
     const start = new Date(event.starts_at);
+    const end = event.ends_at ? new Date(event.ends_at) : null;
     const rule = event.recurrence_rule;
     if (!rule) {
-      pushEvent(event, start);
+      if (end && toDateKey(end) !== toDateKey(start)) {
+        for (let current = new Date(start); current <= end; current = addDays(current, 1)) {
+          const occurrence = new Date(current);
+          occurrence.setHours(start.getHours(), start.getMinutes(), 0, 0);
+          pushEvent(event, occurrence, start, end);
+        }
+        return;
+      }
+      pushEvent(event, start, start, start);
       return;
     }
 
@@ -299,6 +332,7 @@ function CalendarApp() {
   }, [displayEvents]);
   const selectedEvents = selectedDateKey ? eventsByDate.get(selectedDateKey) || [] : [];
   const todayKey = toDateKey(new Date());
+  const isListFocused = selectedDateKey !== null;
 
   const calendarDays = useMemo(() => {
     const gridStart = startOfMonthGrid(visibleDate);
@@ -350,6 +384,8 @@ function CalendarApp() {
       body: "",
       location: "",
       date: dateKey,
+      isPeriod: false,
+      endDate: dateKey,
       time: "",
       ownerId,
       repeatEnabled: false,
@@ -462,17 +498,24 @@ function CalendarApp() {
     setEvents(groups.flat());
   }
 
-  function displayFromEvent(event: EventItem): DisplayEvent {
+  function displayFromEvent(event: EventItem | SearchEventItem): DisplayEvent {
     const calendarIndex = calendars.findIndex((calendar) => calendar.id === event.calendar_id);
     const calendar = calendars.find((item) => item.id === event.calendar_id);
     const start = new Date(event.starts_at);
+    const distance = "distance" in event ? event.distance : undefined;
+    const similarity = "similarity" in event ? event.similarity : undefined;
     return {
       ...event,
       occurrenceKey: `${event.id}:search`,
       originalStartsAt: event.starts_at,
+      isRangeStart: true,
+      isRangeEnd: true,
+      isRangeMiddle: false,
       color: calendarColors[Math.max(0, calendarIndex) % calendarColors.length] || "#0f766e",
       calendarName: calendar?.name || "캘린더",
       starts_at: start.toISOString(),
+      distance,
+      similarity,
     };
   }
 
@@ -490,7 +533,7 @@ function CalendarApp() {
     if (!visibleCalendarIds.length) return;
     await withLoading(async () => {
       const groups = await Promise.all(visibleCalendarIds.map((calendarId) => api.searchEvents(calendarId, query, userId, maxDistance)));
-      const unique = new Map<string, EventItem>();
+      const unique = new Map<string, SearchEventItem>();
       groups.flat().forEach((event) => unique.set(event.id, event));
       setSearchResults(Array.from(unique.values()).map(displayFromEvent));
     });
@@ -547,6 +590,7 @@ function CalendarApp() {
 
   function openEditForm(event: DisplayEvent) {
     const originalDate = new Date(event.originalStartsAt);
+    const endDate = event.ends_at ? new Date(event.ends_at) : null;
     const rule = event.recurrence_rule;
     setEditingEvent(event);
     setForm({
@@ -554,6 +598,8 @@ function CalendarApp() {
       title: event.title,
       body: event.body,
       location: event.location || "",
+      isPeriod: Boolean(endDate && toDateKey(endDate) !== toDateKey(originalDate)),
+      endDate: endDate ? toDateKey(endDate) : toDateKey(originalDate),
       time: event.ends_at ? timeFromIso(event.originalStartsAt) : "",
       repeatEnabled: Boolean(rule),
       repeatType: (rule?.frequency as RepeatType) || "daily",
@@ -577,6 +623,11 @@ function CalendarApp() {
       return;
     }
     const normalizedTime = normalizeTime(form.time);
+    const endsAt = form.isPeriod ? combineDateEnd(form.endDate, form.time) : normalizedTime ? startsAt : null;
+    if (form.isPeriod && (!endsAt || dateFromKey(form.endDate) < dateFromKey(form.date))) {
+      Alert.alert("기간 확인", "종료일자는 시작일자와 같거나 이후여야 합니다.");
+      return;
+    }
     if (!form.calendarId || !form.title.trim() || !form.ownerId) {
       Alert.alert("입력 확인", "달력, 제목, 사용자 선택은 필수입니다.");
       return;
@@ -588,7 +639,7 @@ function CalendarApp() {
         body: form.body.trim(),
         location: form.location.trim(),
         starts_at: startsAt,
-        ends_at: normalizedTime ? startsAt : null,
+        ends_at: endsAt,
         recurrence_rule: buildRule(form),
       };
       if (editingEvent) await api.updateEvent(editingEvent.id, payload, userId);
@@ -688,7 +739,7 @@ function CalendarApp() {
           </Pressable>
         </View>
 
-        <View style={styles.calendarWrap} {...swipeResponder.panHandlers}>
+        <View style={[styles.calendarWrap, isListFocused && styles.calendarWrapCompact]} {...swipeResponder.panHandlers}>
           <View style={styles.weekHeader}>
             {dayLabels.map((label, index) => (
               <Text key={label} style={[styles.weekLabel, index === 0 && styles.holidayText, index === 6 && styles.saturdayText]}>
@@ -710,6 +761,7 @@ function CalendarApp() {
                   key={key}
                   style={[
                     styles.dayCell,
+                    isListFocused && styles.dayCellCompact,
                     !isCurrentMonth && styles.outsideCell,
                     isToday && styles.todayCell,
                     isSelected && styles.selectedCell,
@@ -722,13 +774,30 @@ function CalendarApp() {
                   <Text style={[styles.dayNumber, date.getDay() === 6 && styles.saturdayText, isHoliday(date) && styles.holidayText, !isCurrentMonth && styles.outsideText]}>
                     {date.getDate()}
                   </Text>
-                  {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
-                  {dayEvents.slice(0, eventLimit).map((event) => (
-                    <Text key={event.occurrenceKey} numberOfLines={1} ellipsizeMode="clip" style={[styles.eventChip, { backgroundColor: faintColor(event.color), color: event.color }]}>
-                      {event.title}
-                    </Text>
-                  ))}
-                  {dayEvents.length > eventLimit ? <Text style={styles.moreText}>+{dayEvents.length - eventLimit}</Text> : null}
+                  {isListFocused ? (
+                    dayEvents.length ? <View style={[styles.dayEventMarker, { backgroundColor: faintColor(dayEvents[0].color), borderColor: dayEvents[0].color }]} /> : null
+                  ) : (
+                    <>
+                      {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
+                      {dayEvents.slice(0, eventLimit).map((event) => (
+                        <Text
+                          key={event.occurrenceKey}
+                          numberOfLines={1}
+                          ellipsizeMode="clip"
+                          style={[
+                            styles.eventChip,
+                            event.isRangeMiddle && styles.eventChipMiddle,
+                            event.isRangeStart && styles.eventChipStart,
+                            event.isRangeEnd && styles.eventChipEnd,
+                            { backgroundColor: faintColor(event.color), color: event.color },
+                          ]}
+                        >
+                          {event.title}
+                        </Text>
+                      ))}
+                      {dayEvents.length > eventLimit ? <Text style={styles.moreText}>+{dayEvents.length - eventLimit}</Text> : null}
+                    </>
+                  )}
                 </Pressable>
               );
             })}
@@ -765,7 +834,7 @@ function CalendarApp() {
   function renderSearchModal() {
     return (
       <Modal visible={searchOpen} animationType="slide" transparent onRequestClose={() => setSearchOpen(false)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalBackdrop}>
           <View style={styles.modalPanel}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
@@ -795,6 +864,7 @@ function CalendarApp() {
                     <Text style={styles.eventTitle}>{event.title}</Text>
                     <Text style={styles.muted}>
                       {toDateKey(new Date(event.starts_at))} · {timeFromIso(event.starts_at)} · {event.calendarName}
+                      {typeof event.similarity === "number" ? ` · 유사도 ${Math.round(event.similarity * 100)}%` : ""}
                     </Text>
                     {event.body ? <Text numberOfLines={2} style={styles.eventBody}>{event.body}</Text> : null}
                   </Pressable>
@@ -803,7 +873,7 @@ function CalendarApp() {
               <Text style={styles.muted}>검색 결과가 너무 많으면 설정에서 임계치를 낮춰 보세요.</Text>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     );
   }
@@ -883,7 +953,16 @@ function CalendarApp() {
                 ))}
               </View>
             ) : null}
-            <TextInput value={form.date} onChangeText={(date) => setForm((current) => ({ ...current, date }))} placeholder="날짜 YYYY-MM-DD" placeholderTextColor={placeholderColor} style={styles.input} />
+            <View style={styles.datePeriodRow}>
+              <TextInput value={form.date} onChangeText={(date) => setForm((current) => ({ ...current, date, endDate: current.isPeriod ? current.endDate : date }))} placeholder="날짜 YYYY-MM-DD" placeholderTextColor={placeholderColor} style={[styles.input, styles.flexInput]} />
+              <Pressable style={styles.periodToggle} onPress={() => setForm((current) => ({ ...current, isPeriod: !current.isPeriod, endDate: current.endDate || current.date }))}>
+                <Feather name={form.isPeriod ? "check-square" : "square"} size={20} color="#0f766e" />
+                <Text style={styles.fieldLabel}>기간</Text>
+              </Pressable>
+            </View>
+            {form.isPeriod ? (
+              <TextInput value={form.endDate} onChangeText={(endDate) => setForm((current) => ({ ...current, endDate }))} placeholder="종료일자 YYYY-MM-DD" placeholderTextColor={placeholderColor} style={styles.input} />
+            ) : null}
             <TextInput
               value={form.time}
               onChangeText={(time) => setForm((current) => ({ ...current, time }))}
@@ -1159,10 +1238,12 @@ const styles = StyleSheet.create({
   monthTitle: { textAlign: "center", fontSize: 18, fontWeight: "700", color: "#0f172a" },
   navButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#e2e8f0" },
   calendarWrap: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, overflow: "hidden" },
+  calendarWrapCompact: { flexShrink: 0 },
   weekHeader: { flexDirection: "row", backgroundColor: "#f1f5f9", borderBottomWidth: 1, borderBottomColor: "#cbd5e1" },
   weekLabel: { width: "14.2857%", textAlign: "center", paddingVertical: 8, color: "#334155", fontWeight: "700" },
   grid: { flexDirection: "row", flexWrap: "wrap" },
   dayCell: { width: "14.2857%", height: 76, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 4, gap: 2, backgroundColor: "#fff" },
+  dayCellCompact: { height: 34, padding: 2, alignItems: "center", justifyContent: "center" },
   outsideCell: { backgroundColor: "#d8dee7" },
   todayCell: { backgroundColor: "#fef3c7" },
   selectedCell: { borderWidth: 2, borderColor: "#0f766e" },
@@ -1172,6 +1253,10 @@ const styles = StyleSheet.create({
   holidayName: { color: "#dc2626", fontSize: 9 },
   outsideText: { color: "#475569" },
   eventChip: { borderRadius: 3, paddingHorizontal: 3, fontSize: 9, lineHeight: 12, overflow: "hidden" },
+  eventChipStart: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  eventChipMiddle: { borderRadius: 0 },
+  eventChipEnd: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
+  dayEventMarker: { width: 22, height: 4, borderRadius: 2, borderWidth: 1, marginTop: 2 },
   moreText: { fontSize: 10, color: "#64748b" },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a" },
   fieldLabel: { fontSize: 13, fontWeight: "700", color: "#334155" },
@@ -1209,6 +1294,8 @@ const styles = StyleSheet.create({
   searchResults: { maxHeight: 420 },
   searchResultContent: { gap: 8, paddingBottom: 12 },
   twoColumnRow: { flexDirection: "row", gap: 8 },
+  datePeriodRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  periodToggle: { minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 6, backgroundColor: "#fff", flexDirection: "row", alignItems: "center", gap: 6 },
   flexInput: { flex: 1 },
   pickerRow: { flexDirection: "row", gap: 12 },
   wheelPicker: { flex: 1, alignItems: "center", gap: 10, padding: 12, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, backgroundColor: "#fff" },

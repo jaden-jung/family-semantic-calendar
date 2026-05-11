@@ -73,6 +73,11 @@ class EventOut(BaseModel):
     source: str
 
 
+class SearchEventOut(EventOut):
+    distance: float
+    similarity: float
+
+
 class SearchQuery(BaseModel):
     calendar_id: UUID
     query: str = Field(min_length=1)

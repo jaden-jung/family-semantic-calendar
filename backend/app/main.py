@@ -16,6 +16,7 @@ from app.schemas import (
     CalendarOut,
     EventCreate,
     EventOut,
+    SearchEventOut,
     EventUpdate,
     SearchQuery,
     UserCreate,
@@ -337,7 +338,7 @@ def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User
         ).fetchall()
 
 
-@app.post("/events/search", response_model=list[EventOut])
+@app.post("/events/search", response_model=list[SearchEventOut])
 def search_events(
     payload: SearchQuery,
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
@@ -346,17 +347,31 @@ def search_events(
     assert_member(payload.calendar_id, x_user_id)
     query_embedding = vector_literal(provider.embed(build_query_embedding_text(payload.query)))
     with get_conn() as conn:
-        return conn.execute(
+        rows = conn.execute(
             """
-            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
+            SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source,
+                   embedding <=> %s::vector AS distance
             FROM events
             WHERE calendar_id = %s
               AND (embedding <=> %s::vector) <= %s
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
-            (payload.calendar_id, query_embedding, payload.max_distance, query_embedding, payload.limit),
+            (query_embedding, payload.calendar_id, query_embedding, payload.max_distance, query_embedding, payload.limit),
         ).fetchall()
+        if not rows:
+            rows = conn.execute(
+                """
+                SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source,
+                       embedding <=> %s::vector AS distance
+                FROM events
+                WHERE calendar_id = %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT 1
+                """,
+                (query_embedding, payload.calendar_id, query_embedding),
+            ).fetchall()
+        return [dict(row) | {"similarity": max(0.0, 1.0 - float(row["distance"]))} for row in rows]
 
 
 @app.post("/admin/reembed")

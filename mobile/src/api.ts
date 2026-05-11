@@ -32,6 +32,11 @@ export type EventItem = {
   source: "manual";
 };
 
+export type SearchEventItem = EventItem & {
+  distance: number;
+  similarity: number;
+};
+
 type CreateEventPayload = {
   calendar_id: string;
   created_by: string | null;
@@ -131,7 +136,7 @@ export class ApiClient {
     });
   }
 
-  async searchEvents(calendarId: string, query: string, userId: string, maxDistance: number): Promise<EventItem[]> {
+  async searchEvents(calendarId: string, query: string, userId: string, maxDistance: number): Promise<SearchEventItem[]> {
     return this.request("/events/search", {
       method: "POST",
       headers: { "X-User-Id": userId },
