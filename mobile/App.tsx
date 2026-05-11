@@ -738,7 +738,7 @@ function CalendarApp() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
-      <View style={[styles.screen, { paddingBottom: Math.max(14, insets.bottom + 8) }]} {...screenResponder.panHandlers}>
+      <View style={styles.screen} {...screenResponder.panHandlers}>
         <View style={styles.topBar}>
           <View>
             <Text style={styles.activeCalendarTitle}>{activeCalendars.map((calendar) => calendar.name).join(", ")}</Text>
@@ -844,7 +844,7 @@ function CalendarApp() {
           </View>
         </View>
 
-        <ScrollView style={styles.eventList} contentContainerStyle={[styles.eventListContent, { paddingBottom: insets.bottom + 48 }]}>
+        <ScrollView style={styles.eventList} contentContainerStyle={styles.eventListContent}>
           {selectedEvents.length === 0 ? <Text style={styles.emptyText}>등록된 일정이 없습니다.</Text> : null}
           {selectedEvents.map((event) => (
             <Pressable key={event.occurrenceKey} style={[styles.eventRow, { borderLeftColor: event.color }]} onPress={() => openEditForm(event)}>
@@ -858,7 +858,7 @@ function CalendarApp() {
             </Pressable>
           ))}
         </ScrollView>
-        <Pressable style={[styles.fabButton, { bottom: insets.bottom + 16 }]} onPress={() => openCreateForm(selectedDateKey || toDateKey(new Date()))}>
+        <Pressable style={styles.fabButton} onPress={() => openCreateForm(selectedDateKey || toDateKey(new Date()))}>
           <Feather name="plus" size={26} color="#fff" />
         </Pressable>
       </View>
@@ -874,9 +874,9 @@ function CalendarApp() {
   function renderSearchModal() {
     return (
       <Modal visible={searchOpen} animationType="slide" transparent onRequestClose={() => setSearchOpen(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={insets.bottom} style={styles.modalBackdrop}>
-          <View style={[styles.modalPanel, { paddingBottom: insets.bottom }]}>
-            <View style={[styles.modalContent, { paddingBottom: insets.bottom + 16 }]}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={[styles.modalBackdrop, { paddingBottom: insets.bottom }]}>
+          <View style={styles.modalPanel}>
+            <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.sectionTitle}>일정 검색</Text>
                 <Pressable style={styles.navButton} onPress={() => setSearchOpen(false)}>
@@ -921,7 +921,7 @@ function CalendarApp() {
   function renderYearMonthModal() {
     return (
       <Modal visible={yearMonthOpen} animationType="fade" transparent>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { paddingBottom: insets.bottom }]}>
           <View style={styles.smallModalPanel}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
@@ -963,10 +963,10 @@ function CalendarApp() {
   function renderEventModal() {
     return (
       <Modal visible={formOpen} animationType="slide" transparent onRequestClose={() => setFormOpen(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={insets.bottom} style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={[styles.modalBackdrop, { paddingBottom: insets.bottom }]}>
           <ScrollView
-            style={[styles.modalPanel, { paddingBottom: insets.bottom }]}
-            contentContainerStyle={[styles.modalContent, { paddingBottom: insets.bottom + 24 }]}
+            style={styles.modalPanel}
+            contentContainerStyle={styles.modalContent}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
           >
@@ -1141,10 +1141,10 @@ function CalendarApp() {
   function renderSettingsModal() {
     return (
       <Modal visible={settingsOpen} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { paddingBottom: insets.bottom }]}>
           <ScrollView
-            style={[styles.modalPanel, { paddingBottom: insets.bottom }]}
-            contentContainerStyle={[styles.modalContent, { paddingBottom: insets.bottom + 24 }]}
+            style={styles.modalPanel}
+            contentContainerStyle={styles.modalContent}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
           >
