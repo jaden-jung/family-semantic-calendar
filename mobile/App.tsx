@@ -307,6 +307,19 @@ async function writeSavedUser(user: User) {
   }
 }
 
+async function clearSavedUser() {
+  try {
+    await SecureStore.deleteItemAsync(savedUserKey);
+  } catch {
+    // Best-effort cleanup.
+  }
+  try {
+    await AsyncStorage.removeItem(savedUserKey);
+  } catch {
+    // Best-effort cleanup.
+  }
+}
+
 async function unlockSavedUser() {
   const hasHardware = await LocalAuthentication.hasHardwareAsync();
   const isEnrolled = await LocalAuthentication.isEnrolledAsync();
@@ -446,7 +459,15 @@ function CalendarApp() {
         const user = JSON.parse(stored) as User;
         setDisplayName(user.display_name);
         const unlocked = await unlockSavedUser();
-        if (unlocked) setUserId(user.id);
+        if (unlocked) {
+          try {
+            await api.listUsers(user.id);
+            setUserId(user.id);
+          } catch {
+            await clearSavedUser();
+            setDisplayName("");
+          }
+        }
       }
     } finally {
       setBooting(false);

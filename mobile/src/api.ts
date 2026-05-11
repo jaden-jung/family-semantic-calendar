@@ -156,7 +156,14 @@ export class ApiClient {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || `${response.status} ${response.statusText}`);
+      let message = text || `${response.status} ${response.statusText}`;
+      try {
+        const parsed = JSON.parse(text) as { detail?: unknown };
+        if (typeof parsed.detail === "string") message = parsed.detail;
+      } catch {
+        // Keep the raw response text.
+      }
+      throw new Error(message);
     }
 
     return (await response.json()) as T;
