@@ -344,7 +344,11 @@ def search_events(
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
     x_user_id: Annotated[str, Header(alias="X-User-Id")],
 ):
-    assert_member(payload.calendar_id, x_user_id)
+    calendar_ids = payload.calendar_ids or ([payload.calendar_id] if payload.calendar_id else [])
+    if not calendar_ids:
+        raise HTTPException(status_code=400, detail="calendar_id is required")
+    for calendar_id in calendar_ids:
+        assert_member(calendar_id, x_user_id)
     query_embedding = vector_literal(provider.embed(build_query_embedding_text(payload.query)))
     with get_conn() as conn:
         rows = conn.execute(
@@ -352,12 +356,12 @@ def search_events(
             SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source,
                    embedding <=> %s::vector AS distance
             FROM events
-            WHERE calendar_id = %s
+            WHERE calendar_id = ANY(%s::uuid[])
               AND (embedding <=> %s::vector) <= %s
             ORDER BY embedding <=> %s::vector
             LIMIT %s
             """,
-            (query_embedding, payload.calendar_id, query_embedding, payload.max_distance, query_embedding, payload.limit),
+            (query_embedding, [str(calendar_id) for calendar_id in calendar_ids], query_embedding, payload.max_distance, query_embedding, payload.limit),
         ).fetchall()
         if not rows:
             rows = conn.execute(
@@ -365,11 +369,11 @@ def search_events(
                 SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source,
                        embedding <=> %s::vector AS distance
                 FROM events
-                WHERE calendar_id = %s
+                WHERE calendar_id = ANY(%s::uuid[])
                 ORDER BY embedding <=> %s::vector
                 LIMIT 1
                 """,
-                (query_embedding, payload.calendar_id, query_embedding),
+                (query_embedding, [str(calendar_id) for calendar_id in calendar_ids], query_embedding),
             ).fetchall()
         return [dict(row) | {"similarity": max(0.0, 1.0 - float(row["distance"]))} for row in rows]
 

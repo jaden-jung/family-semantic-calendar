@@ -79,7 +79,8 @@ class SearchEventOut(EventOut):
 
 
 class SearchQuery(BaseModel):
-    calendar_id: UUID
+    calendar_id: UUID | None = None
+    calendar_ids: list[UUID] | None = None
     query: str = Field(min_length=1)
     limit: int = Field(default=10, ge=1, le=50)
     max_distance: float = Field(default=0.2, ge=0, le=2)

@@ -44,6 +44,7 @@ const holidays: Record<string, string> = {
 
 type RepeatType = "daily" | "weekly" | "monthly" | "yearly";
 type MonthMode = "day" | "weekday";
+type CalendarSizeMode = "calendarLarge" | "listLarge";
 type DisplayEvent = EventItem & {
   occurrenceKey: string;
   originalStartsAt: string;
@@ -319,6 +320,7 @@ function CalendarApp() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<DisplayEvent[]>([]);
+  const [calendarSizeMode, setCalendarSizeMode] = useState<CalendarSizeMode>("calendarLarge");
   const [searchMaxDistance, setSearchMaxDistance] = useState("0.2");
   const [yearMonthOpen, setYearMonthOpen] = useState(false);
   const [yearInput, setYearInput] = useState(String(new Date().getFullYear()));
@@ -346,18 +348,23 @@ function CalendarApp() {
   }, [displayEvents]);
   const selectedEvents = selectedDateKey ? eventsByDate.get(selectedDateKey) || [] : [];
   const todayKey = toDateKey(new Date());
-  const isListFocused = selectedDateKey !== null;
+  const isListFocused = calendarSizeMode === "listLarge";
 
   const calendarDays = useMemo(() => {
     const gridStart = startOfMonthGrid(visibleDate);
     return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index));
   }, [visibleDate]);
 
-  const swipeResponder = useMemo(
+  const screenResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 24 && Math.abs(gesture.dy) < 18,
+        onMoveShouldSetPanResponder: (_, gesture) => Math.max(Math.abs(gesture.dx), Math.abs(gesture.dy)) > 24,
         onPanResponderRelease: (_, gesture) => {
+          if (Math.abs(gesture.dy) > Math.abs(gesture.dx)) {
+            if (gesture.dy < -45) setCalendarSizeMode("listLarge");
+            if (gesture.dy > 45) setCalendarSizeMode("calendarLarge");
+            return;
+          }
           if (gesture.dx < -45) movePeriod(1);
           if (gesture.dx > 45) movePeriod(-1);
         },
@@ -547,10 +554,8 @@ function CalendarApp() {
     }
     if (!visibleCalendarIds.length) return;
     await withLoading(async () => {
-      const groups = await Promise.all(visibleCalendarIds.map((calendarId) => api.searchEvents(calendarId, query, userId, maxDistance)));
-      const unique = new Map<string, SearchEventItem>();
-      groups.flat().forEach((event) => unique.set(event.id, event));
-      setSearchResults(Array.from(unique.values()).map(displayFromEvent));
+      const results = await api.searchEvents(visibleCalendarIds, query, userId, maxDistance);
+      setSearchResults(results.map(displayFromEvent));
     });
   }
 
@@ -559,6 +564,7 @@ function CalendarApp() {
     const key = toDateKey(date);
     setSelectedDateKey(key);
     setVisibleDate(new Date(date.getFullYear(), date.getMonth(), 1));
+    setCalendarSizeMode("calendarLarge");
     setSearchOpen(false);
   }
 
@@ -662,6 +668,7 @@ function CalendarApp() {
       setSelectedDateKey(form.date);
       const savedDate = dateFromKey(form.date);
       setVisibleDate(new Date(savedDate.getFullYear(), savedDate.getMonth(), 1));
+      setCalendarSizeMode("calendarLarge");
       setFormOpen(false);
       await refreshEvents(visibleCalendarIds);
     });
@@ -726,7 +733,7 @@ function CalendarApp() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
-      <View style={styles.screen}>
+      <View style={styles.screen} {...screenResponder.panHandlers}>
         <View style={styles.topBar}>
           <View>
             <Text style={styles.activeCalendarTitle}>{activeCalendars.map((calendar) => calendar.name).join(", ")}</Text>
@@ -754,7 +761,7 @@ function CalendarApp() {
           </Pressable>
         </View>
 
-        <View style={[styles.calendarWrap, isListFocused && styles.calendarWrapCompact]} {...swipeResponder.panHandlers}>
+        <View style={[styles.calendarWrap, isListFocused && styles.calendarWrapCompact]}>
           <View style={styles.weekHeader}>
             {dayLabels.map((label, index) => (
               <Text key={label} style={[styles.weekLabel, index === 0 && styles.holidayText, index === 6 && styles.saturdayText]}>
