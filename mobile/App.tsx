@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
+import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
@@ -287,6 +288,19 @@ async function writeSavedUser(user: User) {
   }
 }
 
+async function unlockSavedUser() {
+  const hasHardware = await LocalAuthentication.hasHardwareAsync();
+  const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+  if (!hasHardware || !isEnrolled) return true;
+  const result = await LocalAuthentication.authenticateAsync({
+    promptMessage: "Family Calendar 잠금 해제",
+    cancelLabel: "취소",
+    fallbackLabel: "비밀번호",
+    disableDeviceFallback: false,
+  });
+  return result.success;
+}
+
 function CalendarApp() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
@@ -404,8 +418,9 @@ function CalendarApp() {
       const stored = await readSavedUser();
       if (stored) {
         const user = JSON.parse(stored) as User;
-        setUserId(user.id);
         setDisplayName(user.display_name);
+        const unlocked = await unlockSavedUser();
+        if (unlocked) setUserId(user.id);
       }
     } finally {
       setBooting(false);
