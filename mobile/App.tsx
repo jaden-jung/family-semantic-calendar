@@ -172,6 +172,10 @@ function sameDate(a: Date, b: Date) {
   return toDateKey(a) === toDateKey(b);
 }
 
+function eventColorsForDay(events: DisplayEvent[]) {
+  return Array.from(new Set(events.map((event) => event.color))).slice(0, 4);
+}
+
 function nthWeekdayDate(year: number, month: number, weekday: number, weekOfMonth: number) {
   const first = new Date(year, month, 1);
   const offset = (weekday - first.getDay() + 7) % 7;
@@ -777,6 +781,7 @@ function CalendarApp() {
               const isCurrentMonth = date.getMonth() === visibleDate.getMonth();
               const isSelected = key === selectedDateKey;
               const isToday = key === toDateKey(new Date());
+              const dayEventColors = eventColorsForDay(dayEvents);
               const eventLimit = 2;
               return (
                 <Pressable
@@ -797,26 +802,38 @@ function CalendarApp() {
                     {date.getDate()}
                   </Text>
                   {isListFocused ? (
-                    dayEvents.length ? <View style={[styles.dayEventMarker, { backgroundColor: faintColor(dayEvents[0].color), borderColor: dayEvents[0].color }]} /> : null
+                    dayEventColors.length ? (
+                      <View style={styles.dayEventMarkerRow}>
+                        {dayEventColors.map((color) => (
+                          <View key={color} style={[styles.dayEventDot, { backgroundColor: color }]} />
+                        ))}
+                      </View>
+                    ) : null
                   ) : (
                     <>
                       {name ? <Text numberOfLines={1} style={styles.holidayName}>{name}</Text> : null}
-                      {dayEvents.slice(0, eventLimit).map((event) => (
-                        <Text
-                          key={event.occurrenceKey}
-                          numberOfLines={1}
-                          ellipsizeMode="clip"
-                          style={[
-                            styles.eventChip,
-                            event.isRangeMiddle && styles.eventChipMiddle,
-                            event.isRangeStart && styles.eventChipStart,
-                            event.isRangeEnd && styles.eventChipEnd,
-                            { backgroundColor: faintColor(event.color), color: event.color },
-                          ]}
-                        >
-                          {event.title}
-                        </Text>
-                      ))}
+                      {dayEvents.slice(0, eventLimit).map((event) => {
+                        const continuesFromPrevious = !event.isRangeStart && date.getDay() !== 0;
+                        const continuesToNext = !event.isRangeEnd && date.getDay() !== 6;
+                        return (
+                          <Text
+                            key={event.occurrenceKey}
+                            numberOfLines={1}
+                            ellipsizeMode="clip"
+                            style={[
+                              styles.eventChip,
+                              continuesFromPrevious && styles.eventChipContinueLeft,
+                              continuesToNext && styles.eventChipContinueRight,
+                              continuesFromPrevious && continuesToNext && styles.eventChipMiddle,
+                              !continuesFromPrevious && styles.eventChipStart,
+                              !continuesToNext && styles.eventChipEnd,
+                              { backgroundColor: faintColor(event.color), color: event.color },
+                            ]}
+                          >
+                            {continuesFromPrevious ? "" : event.title}
+                          </Text>
+                        );
+                      })}
                       {dayEvents.length > eventLimit ? <Text style={styles.moreText}>+{dayEvents.length - eventLimit}</Text> : null}
                     </>
                   )}
@@ -1274,11 +1291,14 @@ const styles = StyleSheet.create({
   saturdayText: { color: "#2563eb" },
   holidayName: { color: "#dc2626", fontSize: 9 },
   outsideText: { color: "#475569" },
-  eventChip: { borderRadius: 3, paddingHorizontal: 3, fontSize: 9, lineHeight: 12, overflow: "hidden" },
+  eventChip: { alignSelf: "stretch", minHeight: 12, borderRadius: 3, paddingHorizontal: 3, fontSize: 9, lineHeight: 12, overflow: "hidden" },
   eventChipStart: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
   eventChipMiddle: { borderRadius: 0 },
   eventChipEnd: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
-  dayEventMarker: { width: 22, height: 4, borderRadius: 2, borderWidth: 1, marginTop: 2 },
+  eventChipContinueLeft: { marginLeft: -5, paddingLeft: 5 },
+  eventChipContinueRight: { marginRight: -5 },
+  dayEventMarkerRow: { minHeight: 6, maxWidth: 38, flexDirection: "row", justifyContent: "center", gap: 3, marginTop: 2 },
+  dayEventDot: { width: 5, height: 5, borderRadius: 3 },
   moreText: { fontSize: 10, color: "#64748b" },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: "#0f172a" },
   fieldLabel: { fontSize: 13, fontWeight: "700", color: "#334155" },
