@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as SecureStore from "expo-secure-store";
@@ -278,16 +279,29 @@ function expandEvents(events: EventItem[], calendars: Calendar[], rangeStart: Da
 }
 
 async function readSavedUser() {
+  let secureValue: string | null = null;
   try {
-    return await SecureStore.getItemAsync(savedUserKey);
+    secureValue = await SecureStore.getItemAsync(savedUserKey);
+  } catch {
+    secureValue = null;
+  }
+  if (secureValue) return secureValue;
+  try {
+    return await AsyncStorage.getItem(savedUserKey);
   } catch {
     return null;
   }
 }
 
 async function writeSavedUser(user: User) {
+  const value = JSON.stringify(user);
   try {
-    await SecureStore.setItemAsync(savedUserKey, JSON.stringify(user));
+    await SecureStore.setItemAsync(savedUserKey, value);
+  } catch {
+    // Fall back below. The saved value only contains user id and display name.
+  }
+  try {
+    await AsyncStorage.setItem(savedUserKey, value);
   } catch {
     // Best-effort local cache only.
   }
