@@ -75,6 +75,7 @@ def health() -> dict:
 
 @app.post("/users", response_model=UserOut)
 def create_user(payload: UserCreate):
+    password = payload.password or payload.display_name
     with get_conn() as conn:
         existing = conn.execute(
             "SELECT id, display_name, password_hash FROM users WHERE lower(display_name) = lower(%s) ORDER BY created_at DESC LIMIT 1",
@@ -89,7 +90,7 @@ def create_user(payload: UserCreate):
                     WHERE id = %s
                     RETURNING id, display_name
                     """,
-                    (payload.password, existing["id"]),
+                    (password, existing["id"]),
                 ).fetchone()
                 conn.commit()
                 return row
@@ -100,7 +101,7 @@ def create_user(payload: UserCreate):
             VALUES (%s, crypt(%s, gen_salt('bf')))
             RETURNING id, display_name
             """,
-            (payload.display_name, payload.password),
+            (payload.display_name, password),
         ).fetchone()
         conn.commit()
         return row
@@ -109,6 +110,20 @@ def create_user(payload: UserCreate):
 @app.post("/auth/sign-in", response_model=UserOut)
 def sign_in(payload: UserSignIn):
     with get_conn() as conn:
+        if not payload.password:
+            row = conn.execute(
+                """
+                SELECT id, display_name
+                FROM users
+                WHERE lower(display_name) = lower(%s)
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (payload.display_name,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+            return row
         row = conn.execute(
             """
             SELECT id, display_name

@@ -61,14 +61,14 @@ type UpdateEventPayload = {
 export class ApiClient {
   constructor(private readonly baseUrl: string) {}
 
-  async createUser(displayName: string, password: string): Promise<User> {
+  async createUser(displayName: string, password = ""): Promise<User> {
     return this.request("/users", {
       method: "POST",
       body: { display_name: displayName, password },
     });
   }
 
-  async signIn(displayName: string, password: string): Promise<User> {
+  async signIn(displayName: string, password = ""): Promise<User> {
     return this.request("/auth/sign-in", {
       method: "POST",
       body: { display_name: displayName, password },

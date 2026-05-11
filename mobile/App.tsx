@@ -338,7 +338,6 @@ function CalendarApp() {
   const [booting, setBooting] = useState(true);
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
   const [calendarName, setCalendarName] = useState("우리집 달력");
   const [inviteCode, setInviteCode] = useState("");
   const [calendars, setCalendars] = useState<Calendar[]>([]);
@@ -486,12 +485,12 @@ function CalendarApp() {
   }
 
   async function createUser() {
-    if (!displayName.trim() || !password.trim()) {
-      Alert.alert("사용자 확인", "사용자 이름과 비밀번호를 입력해 주세요.");
+    if (!displayName.trim()) {
+      Alert.alert("사용자 확인", "사용자 이름을 입력해 주세요.");
       return;
     }
     await withLoading(async () => {
-      const user = await api.createUser(displayName.trim(), password);
+      const user = await api.createUser(displayName.trim());
       await writeSavedUser(user);
       setUserId(user.id);
       setDisplayName(user.display_name);
@@ -503,12 +502,14 @@ function CalendarApp() {
   }
 
   async function signIn() {
-    if (!displayName.trim() || !password.trim()) {
-      Alert.alert("로그인 확인", "사용자 이름과 비밀번호를 입력해 주세요.");
+    if (!displayName.trim()) {
+      Alert.alert("로그인 확인", "사용자 이름을 입력해 주세요.");
       return;
     }
     await withLoading(async () => {
-      const user = await api.signIn(displayName.trim(), password);
+      const unlocked = await unlockSavedUser();
+      if (!unlocked) return;
+      const user = await api.signIn(displayName.trim());
       await writeSavedUser(user);
       setUserId(user.id);
       setDisplayName(user.display_name);
@@ -745,7 +746,7 @@ function CalendarApp() {
   }
 
   if (booting) return <LoadingScreen />;
-  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} password={password} setPassword={setPassword} createUser={createUser} signIn={signIn} loading={loading} />;
+  if (!userId) return <SetupScreen displayName={displayName} setDisplayName={setDisplayName} createUser={createUser} signIn={signIn} loading={loading} />;
 
   if (!visibleCalendarIds.length) {
     return (
@@ -1259,16 +1260,12 @@ function LoadingOverlay() {
 function SetupScreen({
   displayName,
   setDisplayName,
-  password,
-  setPassword,
   createUser,
   signIn,
   loading,
 }: {
   displayName: string;
   setDisplayName: (value: string) => void;
-  password: string;
-  setPassword: (value: string) => void;
   createUser: () => void;
   signIn: () => void;
   loading: boolean;
@@ -1282,7 +1279,6 @@ function SetupScreen({
           <Text style={styles.appTitle}>Family Calendar</Text>
         </View>
         <TextInput value={displayName} onChangeText={setDisplayName} placeholder="사용자 이름" placeholderTextColor={placeholderColor} style={styles.input} />
-        <TextInput value={password} onChangeText={setPassword} placeholder="비밀번호" placeholderTextColor={placeholderColor} secureTextEntry style={styles.input} />
         <Pressable style={styles.secondaryButton} onPress={signIn}>
           <Feather name="log-in" size={18} color="#0f172a" />
           <Text style={styles.secondaryButtonText}>기존 사용자 로그인</Text>
