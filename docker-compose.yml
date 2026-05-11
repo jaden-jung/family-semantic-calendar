@@ -2,6 +2,7 @@ services:
   db:
     image: pgvector/pgvector:pg16
     container_name: family-calendar-db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: family_calendar
       POSTGRES_USER: calendar_app
@@ -20,6 +21,7 @@ services:
     build:
       context: ./backend
     container_name: family-calendar-backend
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
