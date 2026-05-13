@@ -12,6 +12,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
+import java.time.YearMonth
 import java.time.ZoneId
 
 const val API_BASE_URL = "https://desktop-lnu5cl7.tail96fe59.ts.net"
@@ -27,6 +28,7 @@ data class EventItem(
     val location: String,
     val startsAt: LocalDateTime,
     val endsAt: LocalDateTime?,
+    val recurrenceRule: JSONObject? = null,
     val similarity: Double? = null,
 )
 
@@ -101,8 +103,9 @@ object CalendarApi {
         location: String,
         startsAt: LocalDateTime,
         endsAt: LocalDateTime?,
+        recurrenceRule: JSONObject? = null,
     ): EventItem {
-        val body = eventPayload(calendarId, userId, title, bodyText, location, startsAt, endsAt).toString()
+        val body = eventPayload(calendarId, userId, title, bodyText, location, startsAt, endsAt, recurrenceRule).toString()
         return JSONObject(request("POST", "/events", body, userId)).toEvent()
     }
 
@@ -114,8 +117,9 @@ object CalendarApi {
         location: String,
         startsAt: LocalDateTime,
         endsAt: LocalDateTime?,
+        recurrenceRule: JSONObject? = null,
     ): EventItem {
-        val body = eventPayload(null, userId, title, bodyText, location, startsAt, endsAt).toString()
+        val body = eventPayload(null, userId, title, bodyText, location, startsAt, endsAt, recurrenceRule).toString()
         val encodedEventId = URLEncoder.encode(eventId, Charsets.UTF_8.name())
         return JSONObject(request("PUT", "/events/$encodedEventId", body, userId)).toEvent()
     }
@@ -150,6 +154,7 @@ object CalendarApi {
         location = optString("location"),
         startsAt = parseDateTime(getString("starts_at")),
         endsAt = optString("ends_at").takeIf { it.isNotBlank() && it != "null" }?.let { parseDateTime(it) },
+        recurrenceRule = optJSONObject("recurrence_rule"),
         similarity = if (has("similarity")) optDouble("similarity") else null,
     )
 
@@ -161,6 +166,7 @@ object CalendarApi {
         location: String,
         startsAt: LocalDateTime,
         endsAt: LocalDateTime?,
+        recurrenceRule: JSONObject?,
     ): JSONObject {
         val payload = JSONObject()
             .put("created_by", userId)
@@ -170,6 +176,7 @@ object CalendarApi {
             .put("starts_at", startsAt.toString())
         if (calendarId != null) payload.put("calendar_id", calendarId)
         if (endsAt != null) payload.put("ends_at", endsAt.toString())
+        if (recurrenceRule != null) payload.put("recurrence_rule", recurrenceRule)
         return payload
     }
 
@@ -209,5 +216,30 @@ object CalendarApi {
 }
 
 fun eventsForDate(events: List<EventItem>, date: LocalDate): List<EventItem> {
-    return events.filter { it.startsAt.toLocalDate() == date }.sortedBy { it.startsAt }
+    return events.filter { it.occursOn(date) }.sortedBy { it.startsAt.toLocalTime() }
+}
+
+private fun EventItem.occursOn(date: LocalDate): Boolean {
+    val startDate = startsAt.toLocalDate()
+    val endDate = endsAt?.toLocalDate()
+    if (recurrenceRule == null) {
+        return if (endDate != null) !date.isBefore(startDate) && !date.isAfter(endDate) else date == startDate
+    }
+    if (date.isBefore(startDate)) return false
+    val interval = recurrenceRule.optInt("interval", 1).coerceAtLeast(1)
+    return when (recurrenceRule.optString("frequency")) {
+        "daily" -> java.time.temporal.ChronoUnit.DAYS.between(startDate, date) % interval == 0L
+        "weekly" -> {
+            val weekday = if (date.dayOfWeek.value == 7) 0 else date.dayOfWeek.value
+            val weekdays = recurrenceRule.optJSONArray("weekdays")
+            val weekdayMatches = weekdays == null || (0 until weekdays.length()).any { weekdays.optInt(it) == weekday }
+            java.time.temporal.ChronoUnit.WEEKS.between(startDate, date) % interval == 0L && weekdayMatches
+        }
+        "monthly" -> {
+            val monthDay = recurrenceRule.optInt("monthDay", startDate.dayOfMonth)
+            java.time.temporal.ChronoUnit.MONTHS.between(YearMonth.from(startDate), YearMonth.from(date)) % interval == 0L && date.dayOfMonth == monthDay
+        }
+        "yearly" -> date.monthValue == startDate.monthValue && date.dayOfMonth == startDate.dayOfMonth
+        else -> false
+    }
 }

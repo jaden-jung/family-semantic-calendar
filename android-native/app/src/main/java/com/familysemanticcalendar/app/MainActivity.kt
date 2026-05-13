@@ -5,8 +5,11 @@ import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.appwidget.AppWidgetManager
+import android.hardware.biometrics.BiometricPrompt
 import android.content.ComponentName
+import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -20,6 +23,8 @@ import android.widget.Spinner
 import android.widget.ArrayAdapter
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -38,8 +43,39 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        user = NativeStore.savedUser(this)
-        if (user == null) showLogin() else showCalendar(loading = true).also { reloadCalendar() }
+        val saved = NativeStore.savedUser(this)
+        if (saved == null) showLogin() else authenticateSavedUser(saved)
+    }
+
+    private fun authenticateSavedUser(saved: User) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            enterCalendar(saved)
+            return
+        }
+        val prompt = BiometricPrompt.Builder(this)
+            .setTitle("지문 인증")
+            .setSubtitle("${saved.displayName} 사용자로 로그인")
+            .setNegativeButton("다른 사용자", mainExecutor) { _, _ -> showLogin() }
+            .build()
+        prompt.authenticate(CancellationSignal(), mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                enterCalendar(saved)
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                if (errorCode != BiometricPrompt.BIOMETRIC_ERROR_CANCELED) showLogin()
+            }
+
+            override fun onAuthenticationFailed() {
+                toast("지문 인증에 실패했습니다.")
+            }
+        })
+    }
+
+    private fun enterCalendar(foundUser: User) {
+        user = foundUser
+        showCalendar(loading = true)
+        reloadCalendar()
     }
 
     private fun showLogin() {
@@ -256,6 +292,22 @@ class MainActivity : Activity() {
             text = "기간 일정"
             isChecked = event?.endsAt?.toLocalDate()?.isAfter(date) == true
         }
+        val repeatCheck = CheckBox(this).apply {
+            text = "반복"
+            isChecked = event?.recurrenceRule != null
+        }
+        val repeatSpinner = Spinner(this)
+        val repeatLabels = listOf("매일", "매주", "매월", "매년")
+        repeatSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, repeatLabels)
+        repeatSpinner.visibility = if (repeatCheck.isChecked) View.VISIBLE else View.GONE
+        val repeatIndex = when (event?.recurrenceRule?.optString("frequency")) {
+            "daily" -> 0
+            "weekly" -> 1
+            "monthly" -> 2
+            "yearly" -> 3
+            else -> 1
+        }
+        repeatSpinner.setSelection(repeatIndex)
         val endDateButton = Button(this).apply {
             text = "종료일 ${endDate.format(dateFormatter)}"
             visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
@@ -281,6 +333,7 @@ class MainActivity : Activity() {
             timeButton.text = "시간 %02d:%02d".format(time.hour, time.minute)
             endDateButton.text = "종료일 ${endDate.format(dateFormatter)}"
             endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
+            repeatSpinner.visibility = if (repeatCheck.isChecked) View.VISIBLE else View.GONE
         }
 
         dateButton.setOnClickListener {
@@ -304,6 +357,7 @@ class MainActivity : Activity() {
             }, time.hour, time.minute, true).show()
         }
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
+        repeatCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
 
         root.addView(TextView(this).text("달력").bold(), matchWrap())
         root.addView(calendarSpinner, matchWrap())
@@ -311,6 +365,8 @@ class MainActivity : Activity() {
         root.addView(timeButton, matchWrap())
         root.addView(periodCheck, matchWrap())
         root.addView(endDateButton, matchWrap())
+        root.addView(repeatCheck, matchWrap())
+        root.addView(repeatSpinner, matchWrap())
         root.addView(titleInput, matchWrap(top = 8))
         root.addView(bodyInput, matchWrap())
         root.addView(locationInput, matchWrap())
@@ -333,12 +389,13 @@ class MainActivity : Activity() {
                 val calendar = calendars[calendarSpinner.selectedItemPosition]
                 val startsAt = LocalDateTime.of(date, time)
                 val endsAt = if (periodCheck.isChecked) LocalDateTime.of(endDate, LocalTime.of(23, 59)) else null
+                val recurrenceRule = if (repeatCheck.isChecked) buildRecurrenceRule(repeatSpinner.selectedItemPosition, date) else null
                 background(
                     work = {
                         if (event == null) {
-                            CalendarApi.createEvent(calendar.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt)
+                            CalendarApi.createEvent(calendar.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt, recurrenceRule)
                         } else {
-                            CalendarApi.updateEvent(event.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt)
+                            CalendarApi.updateEvent(event.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt, recurrenceRule)
                         }
                     },
                     done = {
@@ -369,6 +426,16 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+    }
+
+    private fun buildRecurrenceRule(index: Int, date: LocalDate): JSONObject {
+        val weekday = if (date.dayOfWeek.value == 7) 0 else date.dayOfWeek.value
+        return when (index) {
+            0 -> JSONObject().put("frequency", "daily").put("interval", 1)
+            1 -> JSONObject().put("frequency", "weekly").put("interval", 1).put("weekdays", JSONArray(listOf(weekday)))
+            2 -> JSONObject().put("frequency", "monthly").put("interval", 1).put("monthDay", date.dayOfMonth)
+            else -> JSONObject().put("frequency", "yearly").put("interval", 1)
+        }
     }
 
     private fun showSearchDialog() {
