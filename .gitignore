@@ -7,6 +7,8 @@ node_modules/
 .expo/
 dist/
 build/
+.gradle/
+local.properties
 
 .DS_Store
 Thumbs.db
