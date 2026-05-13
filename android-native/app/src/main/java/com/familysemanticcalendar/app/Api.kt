@@ -32,6 +32,8 @@ data class EventItem(
     val similarity: Double? = null,
 )
 
+const val ALL_OWNER_ID = "__all__"
+
 object NativeStore {
     private const val PREFS = "family-calendar-native"
     private const val USER_ID = "user_id"
@@ -104,6 +106,24 @@ object CalendarApi {
         )
     }
 
+    fun joinCalendar(inviteCode: String, userId: String): CalendarItem {
+        val body = JSONObject()
+            .put("invite_code", inviteCode)
+            .put("user_id", userId)
+            .toString()
+        val item = JSONObject(request("POST", "/calendars/join", body, userId))
+        return CalendarItem(
+            id = item.getString("id"),
+            name = item.getString("name"),
+            inviteCode = item.getString("invite_code"),
+        )
+    }
+
+    fun listUsers(userId: String): List<User> {
+        val array = JSONArray(request("GET", "/users", userId = userId))
+        return (0 until array.length()).map { array.getJSONObject(it).toUser() }
+    }
+
     fun listEvents(calendarId: String, userId: String): List<EventItem> {
         val encodedCalendarId = URLEncoder.encode(calendarId, Charsets.UTF_8.name())
         val array = JSONArray(request("GET", "/events?calendar_id=$encodedCalendarId", userId = userId))
@@ -118,9 +138,10 @@ object CalendarApi {
         location: String,
         startsAt: LocalDateTime,
         endsAt: LocalDateTime?,
+        ownerId: String?,
         recurrenceRule: JSONObject? = null,
     ): EventItem {
-        val body = eventPayload(calendarId, userId, title, bodyText, location, startsAt, endsAt, recurrenceRule).toString()
+        val body = eventPayload(calendarId, ownerId, title, bodyText, location, startsAt, endsAt, recurrenceRule).toString()
         return JSONObject(request("POST", "/events", body, userId)).toEvent()
     }
 
@@ -132,9 +153,10 @@ object CalendarApi {
         location: String,
         startsAt: LocalDateTime,
         endsAt: LocalDateTime?,
+        ownerId: String?,
         recurrenceRule: JSONObject? = null,
     ): EventItem {
-        val body = eventPayload(null, userId, title, bodyText, location, startsAt, endsAt, recurrenceRule).toString()
+        val body = eventPayload(null, ownerId, title, bodyText, location, startsAt, endsAt, recurrenceRule).toString()
         val encodedEventId = URLEncoder.encode(eventId, Charsets.UTF_8.name())
         return JSONObject(request("PUT", "/events/$encodedEventId", body, userId)).toEvent()
     }
@@ -175,7 +197,7 @@ object CalendarApi {
 
     private fun eventPayload(
         calendarId: String?,
-        userId: String,
+        ownerId: String?,
         title: String,
         bodyText: String,
         location: String,
@@ -184,11 +206,11 @@ object CalendarApi {
         recurrenceRule: JSONObject?,
     ): JSONObject {
         val payload = JSONObject()
-            .put("created_by", userId)
             .put("title", title)
             .put("body", bodyText)
             .put("location", location)
             .put("starts_at", startsAt.toString())
+        if (ownerId == null) payload.put("created_by", JSONObject.NULL) else payload.put("created_by", ownerId)
         if (calendarId != null) payload.put("calendar_id", calendarId)
         if (endsAt != null) payload.put("ends_at", endsAt.toString())
         if (recurrenceRule != null) payload.put("recurrence_rule", recurrenceRule)
@@ -232,6 +254,11 @@ object CalendarApi {
 
 fun eventsForDate(events: List<EventItem>, date: LocalDate): List<EventItem> {
     return events.filter { it.occursOn(date) }.sortedBy { it.startsAt.toLocalTime() }
+}
+
+fun ownerName(members: List<User>, ownerId: String?): String {
+    if (ownerId == null || ownerId == ALL_OWNER_ID) return "모두"
+    return members.find { it.id == ownerId }?.displayName ?: "알 수 없음"
 }
 
 fun holidayName(date: LocalDate): String? {

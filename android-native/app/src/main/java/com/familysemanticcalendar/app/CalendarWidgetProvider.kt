@@ -20,11 +20,12 @@ class CalendarWidgetProvider : AppWidgetProvider() {
                     appWidgetIds.associateWith { "앱에서 먼저 로그인해 주세요." }
                 } else {
                     val calendars = CalendarApi.listCalendars(user.id)
+                    val members = CalendarApi.listUsers(user.id)
                     val events = calendars.flatMap { CalendarApi.listEvents(it.id, user.id) }
                     appWidgetIds.associateWith { widgetId ->
                         val options = appWidgetManager.getAppWidgetOptions(widgetId)
                         val maxItems = if (options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110) >= 180) 8 else 4
-                        upcomingBody(events, maxItems)
+                        upcomingBody(events, members, maxItems)
                     }
                 }
             } catch (error: Exception) {
@@ -42,7 +43,7 @@ class CalendarWidgetProvider : AppWidgetProvider() {
         return "오늘 일정 · ${today.monthValue}/${today.dayOfMonth}$holiday"
     }
 
-    private fun upcomingBody(events: List<EventItem>, maxItems: Int): String {
+    private fun upcomingBody(events: List<EventItem>, members: List<User>, maxItems: Int): String {
         val today = LocalDate.now()
         val rows = mutableListOf<String>()
         for (offset in 0..7) {
@@ -54,7 +55,7 @@ class CalendarWidgetProvider : AppWidgetProvider() {
                     1 -> "내일"
                     else -> "${date.monthValue}/${date.dayOfMonth}"
                 }
-                rows.add("$prefix ${event.title}")
+                rows.add("$prefix [${ownerName(members, event.createdBy)}] ${event.title}")
             }
             if (rows.size >= maxItems) break
         }

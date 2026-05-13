@@ -41,6 +41,7 @@ class MainActivity : Activity() {
     private var visibleMonth: YearMonth = YearMonth.now()
     private var selectedDate: LocalDate = LocalDate.now()
     private var calendars: List<CalendarItem> = emptyList()
+    private var members: List<User> = emptyList()
     private var selectedCalendarId: String? = null
     private var events: List<EventItem> = emptyList()
 
@@ -212,6 +213,7 @@ class MainActivity : Activity() {
                 if (selectedCalendarId == null || calendars.none { it.id == selectedCalendarId }) {
                     selectedCalendarId = calendars.firstOrNull()?.id
                 }
+                members = CalendarApi.listUsers(currentUser.id)
                 events = calendars.flatMap { CalendarApi.listEvents(it.id, currentUser.id) }
             },
             done = {
@@ -266,8 +268,9 @@ class MainActivity : Activity() {
         items.forEach { event ->
             val endText = event.endsAt?.takeIf { it.toLocalDate() != event.startsAt.toLocalDate() }?.let { " ~ ${it.toLocalDate().format(dateFormatter)}" } ?: ""
             val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
+            val owner = ownerName(members, event.createdBy)
             container.addView(Button(this).apply {
-                text = "$time  ${event.title}$endText"
+                text = "$time  [$owner] ${event.title}$endText"
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setOnClickListener { showEventDialog(event) }
             }, matchWrap(top = 4))
@@ -290,6 +293,12 @@ class MainActivity : Activity() {
         calendarSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, calendarNames)
         val calendarIndex = calendars.indexOfFirst { it.id == (event?.calendarId ?: selectedCalendarId) }.coerceAtLeast(0)
         calendarSpinner.setSelection(calendarIndex)
+        val ownerSpinner = Spinner(this)
+        val owners = listOf(User(ALL_OWNER_ID, "모두")) + members
+        ownerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, owners.map { it.displayName })
+        val defaultOwnerId = event?.createdBy ?: currentUser.id
+        val ownerIndex = owners.indexOfFirst { it.id == defaultOwnerId }.let { if (it >= 0) it else 0 }
+        ownerSpinner.setSelection(ownerIndex)
 
         val dateButton = Button(this).apply { text = "날짜 ${date.format(dateFormatter)}" }
         val timeButton = Button(this).apply { text = "시간 %02d:%02d".format(time.hour, time.minute) }
@@ -366,6 +375,8 @@ class MainActivity : Activity() {
 
         root.addView(TextView(this).text("달력").bold(), matchWrap())
         root.addView(calendarSpinner, matchWrap())
+        root.addView(TextView(this).text("누구 일정").bold(), matchWrap(top = 8))
+        root.addView(ownerSpinner, matchWrap())
         root.addView(dateButton, matchWrap(top = 8))
         root.addView(timeButton, matchWrap())
         root.addView(periodCheck, matchWrap())
@@ -392,15 +403,16 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
                 val calendar = calendars[calendarSpinner.selectedItemPosition]
+                val owner = owners[ownerSpinner.selectedItemPosition].id.let { if (it == ALL_OWNER_ID) null else it }
                 val startsAt = LocalDateTime.of(date, time)
                 val endsAt = if (periodCheck.isChecked) LocalDateTime.of(endDate, LocalTime.of(23, 59)) else null
                 val recurrenceRule = if (repeatCheck.isChecked) buildRecurrenceRule(repeatSpinner.selectedItemPosition, date) else null
                 background(
                     work = {
                         if (event == null) {
-                            CalendarApi.createEvent(calendar.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt, recurrenceRule)
+                            CalendarApi.createEvent(calendar.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt, owner, recurrenceRule)
                         } else {
-                            CalendarApi.updateEvent(event.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt, recurrenceRule)
+                            CalendarApi.updateEvent(event.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt, owner, recurrenceRule)
                         }
                     },
                     done = {
@@ -495,6 +507,7 @@ class MainActivity : Activity() {
         val names = calendars.map { "선택: ${it.name}" }.toMutableList()
         if (selectedCalendarId != null) names.add("초대코드 복사")
         names.add("검색 임계치 설정 (${NativeStore.searchMaxDistance(this)})")
+        names.add("초대코드로 참여")
         names.add("+ 새 달력 만들기")
         AlertDialog.Builder(this)
             .setTitle("설정")
@@ -506,6 +519,8 @@ class MainActivity : Activity() {
                     copyInviteCode()
                 } else if (index == calendars.size + if (selectedCalendarId != null) 1 else 0) {
                     showSearchThresholdDialog()
+                } else if (index == calendars.size + if (selectedCalendarId != null) 2 else 1) {
+                    showJoinCalendarDialog(currentUser)
                 } else {
                     showCreateCalendarDialog(currentUser)
                 }
@@ -562,6 +577,30 @@ class MainActivity : Activity() {
                 if (name.isNotBlank()) {
                     background(
                         work = { CalendarApi.createCalendar(name, currentUser.id) },
+                        done = {
+                            selectedCalendarId = it.id
+                            reloadCalendar()
+                        },
+                    )
+                }
+            }
+            .show()
+    }
+
+    private fun showJoinCalendarDialog(currentUser: User) {
+        val input = EditText(this).apply {
+            hint = "초대 코드"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("달력 참여")
+            .setView(input)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("참여") { _, _ ->
+                val inviteCode = input.text.toString().trim()
+                if (inviteCode.isNotBlank()) {
+                    background(
+                        work = { CalendarApi.joinCalendar(inviteCode, currentUser.id) },
                         done = {
                             selectedCalendarId = it.id
                             reloadCalendar()
