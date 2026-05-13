@@ -1,29 +1,39 @@
 package com.familysemanticcalendar.app
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import android.widget.TextView
 import android.widget.Toast
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 class MainActivity : Activity() {
     private val monthFormatter = DateTimeFormatter.ofPattern("yyyy년 M월")
+    private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     private var user: User? = null
     private var visibleMonth: YearMonth = YearMonth.now()
     private var selectedDate: LocalDate = LocalDate.now()
     private var calendars: List<CalendarItem> = emptyList()
+    private var selectedCalendarId: String? = null
     private var events: List<EventItem> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,7 +46,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).vertical().withPadding(28)
         root.gravity = Gravity.CENTER_VERTICAL
 
-        val title = TextView(this).text("Family Calendar").size(26).bold()
+        val title = TextView(this).text("Family Calendar Native").size(26).bold()
         val nameInput = EditText(this).apply {
             hint = "사용자 이름"
             setSingleLine(true)
@@ -105,9 +115,17 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        val secondRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val prev = Button(this).apply { text = "<" }
         val next = Button(this).apply { text = ">" }
+        val add = Button(this).apply { text = "+ 일정" }
+        val search = Button(this).apply { text = "검색" }
+        val settings = Button(this).apply { text = "달력" }
         val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(20).bold().center()
+        val calendarTitle = TextView(this).text(activeCalendarLabel()).size(14).muted()
         val calendarGrid = GridLayout(this).apply {
             columnCount = 7
             rowCount = 7
@@ -124,11 +142,19 @@ class MainActivity : Activity() {
             visibleMonth = visibleMonth.plusMonths(1)
             showCalendar()
         }
+        add.setOnClickListener { showEventDialog() }
+        search.setOnClickListener { showSearchDialog() }
+        settings.setOnClickListener { showCalendarDialog() }
 
-        top.addView(prev, LinearLayout.LayoutParams(70, LinearLayout.LayoutParams.WRAP_CONTENT))
+        top.addView(prev, LinearLayout.LayoutParams(64, LinearLayout.LayoutParams.WRAP_CONTENT))
         top.addView(monthTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(next, LinearLayout.LayoutParams(70, LinearLayout.LayoutParams.WRAP_CONTENT))
+        top.addView(next, LinearLayout.LayoutParams(64, LinearLayout.LayoutParams.WRAP_CONTENT))
+        secondRow.addView(add, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        secondRow.addView(search, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        secondRow.addView(settings, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, matchWrap())
+        root.addView(calendarTitle, matchWrap(top = 4))
+        root.addView(secondRow, matchWrap(top = 8))
         root.addView(calendarGrid, matchWrap(top = 8))
         root.addView(listTitle, matchWrap(top = 12))
         root.addView(eventList, matchWrap(top = 6))
@@ -144,6 +170,9 @@ class MainActivity : Activity() {
         background(
             work = {
                 calendars = CalendarApi.listCalendars(currentUser.id)
+                if (selectedCalendarId == null || calendars.none { it.id == selectedCalendarId }) {
+                    selectedCalendarId = calendars.firstOrNull()?.id
+                }
                 events = calendars.flatMap { CalendarApi.listEvents(it.id, currentUser.id) }
             },
             done = {
@@ -155,8 +184,8 @@ class MainActivity : Activity() {
 
     private fun drawCalendar(grid: GridLayout) {
         grid.removeAllViews()
-        listOf("일", "월", "화", "수", "목", "금", "토").forEach { label ->
-            grid.addView(dayText(label, header = true), cellParams())
+        listOf("일", "월", "화", "수", "목", "금", "토").forEachIndexed { index, label ->
+            grid.addView(dayText(label, header = true, sunday = index == 0, saturday = index == 6), cellParams(48))
         }
         val first = visibleMonth.atDay(1)
         val start = first.minusDays(first.dayOfWeek.value % 7L)
@@ -165,14 +194,23 @@ class MainActivity : Activity() {
             val dayEvents = eventsForDate(events, date)
             val label = buildString {
                 append(date.dayOfMonth)
-                if (dayEvents.isNotEmpty()) append("\n").append(dayEvents.first().title.take(7))
+                if (dayEvents.isNotEmpty()) append("\n").append(dayEvents.first().title.take(8))
+                if (dayEvents.size > 1) append(" +").append(dayEvents.size - 1)
             }
-            val cell = dayText(label, inMonth = date.month == visibleMonth.month, today = date == LocalDate.now(), selected = date == selectedDate)
+            val cell = dayText(
+                value = label,
+                inMonth = date.month == visibleMonth.month,
+                today = date == LocalDate.now(),
+                selected = date == selectedDate,
+                sunday = date.dayOfWeek.value == 7,
+                saturday = date.dayOfWeek.value == 6,
+            )
             cell.setOnClickListener {
                 selectedDate = date
+                visibleMonth = YearMonth.from(date)
                 showCalendar()
             }
-            grid.addView(cell, cellParams())
+            grid.addView(cell, cellParams(92))
         }
     }
 
@@ -185,17 +223,270 @@ class MainActivity : Activity() {
             return
         }
         items.forEach { event ->
+            val endText = event.endsAt?.takeIf { it.toLocalDate() != event.startsAt.toLocalDate() }?.let { " ~ ${it.toLocalDate().format(dateFormatter)}" } ?: ""
             val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
-            container.addView(TextView(this).text("$time  ${event.title}").size(15).withPadding(8), matchWrap(top = 4))
+            container.addView(Button(this).apply {
+                text = "$time  ${event.title}$endText"
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                setOnClickListener { showEventDialog(event) }
+            }, matchWrap(top = 4))
         }
     }
 
-    private fun dayText(value: String, header: Boolean = false, inMonth: Boolean = true, today: Boolean = false, selected: Boolean = false): TextView {
+    private fun showEventDialog(event: EventItem? = null) {
+        val currentUser = user ?: return
+        if (calendars.isEmpty()) {
+            toast("먼저 달력을 만들어 주세요.")
+            return
+        }
+        var date = event?.startsAt?.toLocalDate() ?: selectedDate
+        var time = event?.startsAt?.toLocalTime() ?: LocalTime.of(9, 0)
+        var endDate = event?.endsAt?.toLocalDate() ?: date
+
+        val root = LinearLayout(this).vertical().withPadding(18)
+        val calendarSpinner = Spinner(this)
+        val calendarNames = calendars.map { it.name }
+        calendarSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, calendarNames)
+        val calendarIndex = calendars.indexOfFirst { it.id == (event?.calendarId ?: selectedCalendarId) }.coerceAtLeast(0)
+        calendarSpinner.setSelection(calendarIndex)
+
+        val dateButton = Button(this).apply { text = "날짜 ${date.format(dateFormatter)}" }
+        val timeButton = Button(this).apply { text = "시간 %02d:%02d".format(time.hour, time.minute) }
+        val periodCheck = CheckBox(this).apply {
+            text = "기간 일정"
+            isChecked = event?.endsAt?.toLocalDate()?.isAfter(date) == true
+        }
+        val endDateButton = Button(this).apply {
+            text = "종료일 ${endDate.format(dateFormatter)}"
+            visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
+        }
+        val titleInput = EditText(this).apply {
+            hint = "제목"
+            setSingleLine(true)
+            setText(event?.title.orEmpty())
+        }
+        val bodyInput = EditText(this).apply {
+            hint = "설명"
+            minLines = 3
+            setText(event?.body.orEmpty())
+        }
+        val locationInput = EditText(this).apply {
+            hint = "장소"
+            setSingleLine(true)
+            setText(event?.location.orEmpty())
+        }
+
+        fun refreshButtons() {
+            dateButton.text = "날짜 ${date.format(dateFormatter)}"
+            timeButton.text = "시간 %02d:%02d".format(time.hour, time.minute)
+            endDateButton.text = "종료일 ${endDate.format(dateFormatter)}"
+            endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
+        }
+
+        dateButton.setOnClickListener {
+            DatePickerDialog(this, { _, year, month, day ->
+                date = LocalDate.of(year, month + 1, day)
+                if (endDate.isBefore(date)) endDate = date
+                refreshButtons()
+            }, date.year, date.monthValue - 1, date.dayOfMonth).show()
+        }
+        endDateButton.setOnClickListener {
+            DatePickerDialog(this, { _, year, month, day ->
+                endDate = LocalDate.of(year, month + 1, day)
+                if (endDate.isBefore(date)) endDate = date
+                refreshButtons()
+            }, endDate.year, endDate.monthValue - 1, endDate.dayOfMonth).show()
+        }
+        timeButton.setOnClickListener {
+            TimePickerDialog(this, { _, hour, minute ->
+                time = LocalTime.of(hour, minute)
+                refreshButtons()
+            }, time.hour, time.minute, true).show()
+        }
+        periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
+
+        root.addView(TextView(this).text("달력").bold(), matchWrap())
+        root.addView(calendarSpinner, matchWrap())
+        root.addView(dateButton, matchWrap(top = 8))
+        root.addView(timeButton, matchWrap())
+        root.addView(periodCheck, matchWrap())
+        root.addView(endDateButton, matchWrap())
+        root.addView(titleInput, matchWrap(top = 8))
+        root.addView(bodyInput, matchWrap())
+        root.addView(locationInput, matchWrap())
+
+        val builder = AlertDialog.Builder(this)
+            .setTitle(if (event == null) "일정 추가" else "일정 수정")
+            .setView(ScrollView(this).apply { addView(root) })
+            .setNegativeButton("취소", null)
+            .setPositiveButton("저장", null)
+        if (event != null) builder.setNeutralButton("삭제", null)
+        val dialog = builder.create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val title = titleInput.text.toString().trim()
+                if (title.isBlank()) {
+                    toast("제목을 입력해 주세요.")
+                    return@setOnClickListener
+                }
+                val calendar = calendars[calendarSpinner.selectedItemPosition]
+                val startsAt = LocalDateTime.of(date, time)
+                val endsAt = if (periodCheck.isChecked) LocalDateTime.of(endDate, LocalTime.of(23, 59)) else null
+                background(
+                    work = {
+                        if (event == null) {
+                            CalendarApi.createEvent(calendar.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt)
+                        } else {
+                            CalendarApi.updateEvent(event.id, currentUser.id, title, bodyInput.text.toString(), locationInput.text.toString(), startsAt, endsAt)
+                        }
+                    },
+                    done = {
+                        dialog.dismiss()
+                        selectedDate = date
+                        visibleMonth = YearMonth.from(date)
+                        reloadCalendar()
+                    },
+                )
+            }
+            if (event != null) {
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+                    AlertDialog.Builder(this)
+                        .setTitle("일정 삭제")
+                        .setMessage("이 일정을 삭제할까요?")
+                        .setNegativeButton("취소", null)
+                        .setPositiveButton("삭제") { _, _ ->
+                            background(
+                                work = { CalendarApi.deleteEvent(event.id, currentUser.id) },
+                                done = {
+                                    dialog.dismiss()
+                                    reloadCalendar()
+                                },
+                            )
+                        }
+                        .show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showSearchDialog() {
+        val currentUser = user ?: return
+        if (calendars.isEmpty()) {
+            toast("검색할 달력이 없습니다.")
+            return
+        }
+        val input = EditText(this).apply {
+            hint = "검색어"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("일정 검색")
+            .setView(input)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("검색") { _, _ ->
+                val query = input.text.toString().trim()
+                if (query.isNotBlank()) {
+                    background(
+                        work = { CalendarApi.searchEvents(calendars.map { it.id }, query, currentUser.id) },
+                        done = { showSearchResults(it) },
+                    )
+                }
+            }
+            .show()
+    }
+
+    private fun showSearchResults(results: List<EventItem>) {
+        if (results.isEmpty()) {
+            toast("검색 결과가 없습니다.")
+            return
+        }
+        val labels = results.map { event ->
+            val score = event.similarity?.let { " · 유사도 ${"%.2f".format(it)}" } ?: ""
+            "${event.startsAt.toLocalDate().format(dateFormatter)}  ${event.title}$score"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("검색 결과")
+            .setItems(labels) { _, index ->
+                val event = results[index]
+                selectedDate = event.startsAt.toLocalDate()
+                visibleMonth = YearMonth.from(selectedDate)
+                showCalendar()
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun showCalendarDialog() {
+        val currentUser = user ?: return
+        val names = calendars.map { it.name }.toMutableList()
+        names.add("+ 새 달력 만들기")
+        AlertDialog.Builder(this)
+            .setTitle("달력 선택")
+            .setItems(names.toTypedArray()) { _, index ->
+                if (index < calendars.size) {
+                    selectedCalendarId = calendars[index].id
+                    showCalendar()
+                } else {
+                    showCreateCalendarDialog(currentUser)
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun showCreateCalendarDialog(currentUser: User) {
+        val input = EditText(this).apply {
+            hint = "달력 이름"
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("새 달력 만들기")
+            .setView(input)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("만들기") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotBlank()) {
+                    background(
+                        work = { CalendarApi.createCalendar(name, currentUser.id) },
+                        done = {
+                            selectedCalendarId = it.id
+                            reloadCalendar()
+                        },
+                    )
+                }
+            }
+            .show()
+    }
+
+    private fun activeCalendarLabel(): String {
+        if (calendars.isEmpty()) return "참여 중인 달력이 없습니다."
+        val selected = calendars.find { it.id == selectedCalendarId }
+        return selected?.name ?: "${calendars.size}개 달력"
+    }
+
+    private fun dayText(
+        value: String,
+        header: Boolean = false,
+        inMonth: Boolean = true,
+        today: Boolean = false,
+        selected: Boolean = false,
+        sunday: Boolean = false,
+        saturday: Boolean = false,
+    ): TextView {
         return TextView(this).apply {
             text = value
             textSize = if (header) 13f else 12f
             gravity = Gravity.CENTER
-            setTextColor(if (inMonth) 0xFF0F172A.toInt() else 0xFF94A3B8.toInt())
+            setTextColor(
+                when {
+                    sunday -> 0xFFDC2626.toInt()
+                    saturday -> 0xFF2563EB.toInt()
+                    inMonth -> 0xFF0F172A.toInt()
+                    else -> 0xFF94A3B8.toInt()
+                }
+            )
             if (header) setTypeface(typeface, android.graphics.Typeface.BOLD)
             setBackgroundColor(
                 when {
@@ -242,15 +533,9 @@ private fun wrapCenter(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.La
     topMargin = top
     gravity = Gravity.CENTER_HORIZONTAL
 }
-private fun cellParams() = ViewGroupMarginParams.grid()
-
-private object ViewGroupMarginParams {
-    fun grid(): GridLayout.LayoutParams {
-        return GridLayout.LayoutParams().apply {
-            width = 0
-            height = 96
-            columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-            setMargins(1, 1, 1, 1)
-        }
-    }
+private fun cellParams(height: Int) = GridLayout.LayoutParams().apply {
+    width = 0
+    this.height = height
+    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+    setMargins(1, 1, 1, 1)
 }

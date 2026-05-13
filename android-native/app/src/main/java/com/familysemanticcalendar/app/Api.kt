@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.URLEncoder
 import java.net.URL
 import java.time.Instant
 import java.time.LocalDate
@@ -20,10 +21,13 @@ data class CalendarItem(val id: String, val name: String, val inviteCode: String
 data class EventItem(
     val id: String,
     val calendarId: String,
+    val createdBy: String?,
     val title: String,
     val body: String,
     val location: String,
     val startsAt: LocalDateTime,
+    val endsAt: LocalDateTime?,
+    val similarity: Double? = null,
 )
 
 object NativeStore {
@@ -70,8 +74,65 @@ object CalendarApi {
         }
     }
 
+    fun createCalendar(name: String, userId: String): CalendarItem {
+        val body = JSONObject()
+            .put("name", name)
+            .put("owner_user_id", userId)
+            .toString()
+        val item = JSONObject(request("POST", "/calendars", body, userId))
+        return CalendarItem(
+            id = item.getString("id"),
+            name = item.getString("name"),
+            inviteCode = item.getString("invite_code"),
+        )
+    }
+
     fun listEvents(calendarId: String, userId: String): List<EventItem> {
-        val array = JSONArray(request("GET", "/events?calendar_id=$calendarId", userId = userId))
+        val encodedCalendarId = URLEncoder.encode(calendarId, Charsets.UTF_8.name())
+        val array = JSONArray(request("GET", "/events?calendar_id=$encodedCalendarId", userId = userId))
+        return (0 until array.length()).map { array.getJSONObject(it).toEvent() }
+    }
+
+    fun createEvent(
+        calendarId: String,
+        userId: String,
+        title: String,
+        bodyText: String,
+        location: String,
+        startsAt: LocalDateTime,
+        endsAt: LocalDateTime?,
+    ): EventItem {
+        val body = eventPayload(calendarId, userId, title, bodyText, location, startsAt, endsAt).toString()
+        return JSONObject(request("POST", "/events", body, userId)).toEvent()
+    }
+
+    fun updateEvent(
+        eventId: String,
+        userId: String,
+        title: String,
+        bodyText: String,
+        location: String,
+        startsAt: LocalDateTime,
+        endsAt: LocalDateTime?,
+    ): EventItem {
+        val body = eventPayload(null, userId, title, bodyText, location, startsAt, endsAt).toString()
+        val encodedEventId = URLEncoder.encode(eventId, Charsets.UTF_8.name())
+        return JSONObject(request("PUT", "/events/$encodedEventId", body, userId)).toEvent()
+    }
+
+    fun deleteEvent(eventId: String, userId: String) {
+        val encodedEventId = URLEncoder.encode(eventId, Charsets.UTF_8.name())
+        request("DELETE", "/events/$encodedEventId", userId = userId)
+    }
+
+    fun searchEvents(calendarIds: List<String>, query: String, userId: String, maxDistance: Double = 0.2): List<EventItem> {
+        val body = JSONObject()
+            .put("calendar_ids", JSONArray(calendarIds))
+            .put("query", query)
+            .put("limit", 20)
+            .put("max_distance", maxDistance)
+            .toString()
+        val array = JSONArray(request("POST", "/events/search", body, userId))
         return (0 until array.length()).map { array.getJSONObject(it).toEvent() }
     }
 
@@ -83,11 +144,34 @@ object CalendarApi {
     private fun JSONObject.toEvent() = EventItem(
         id = getString("id"),
         calendarId = getString("calendar_id"),
+        createdBy = optString("created_by").takeIf { it.isNotBlank() && it != "null" },
         title = getString("title"),
         body = optString("body"),
         location = optString("location"),
         startsAt = parseDateTime(getString("starts_at")),
+        endsAt = optString("ends_at").takeIf { it.isNotBlank() && it != "null" }?.let { parseDateTime(it) },
+        similarity = if (has("similarity")) optDouble("similarity") else null,
     )
+
+    private fun eventPayload(
+        calendarId: String?,
+        userId: String,
+        title: String,
+        bodyText: String,
+        location: String,
+        startsAt: LocalDateTime,
+        endsAt: LocalDateTime?,
+    ): JSONObject {
+        val payload = JSONObject()
+            .put("created_by", userId)
+            .put("title", title)
+            .put("body", bodyText)
+            .put("location", location)
+            .put("starts_at", startsAt.toString())
+        if (calendarId != null) payload.put("calendar_id", calendarId)
+        if (endsAt != null) payload.put("ends_at", endsAt.toString())
+        return payload
+    }
 
     private fun parseDateTime(value: String): LocalDateTime {
         return try {
