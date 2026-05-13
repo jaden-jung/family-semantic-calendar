@@ -6,7 +6,10 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.appwidget.AppWidgetManager
 import android.hardware.biometrics.BiometricPrompt
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
@@ -159,7 +162,7 @@ class MainActivity : Activity() {
         val next = Button(this).apply { text = ">" }
         val add = Button(this).apply { text = "+ 일정" }
         val search = Button(this).apply { text = "검색" }
-        val settings = Button(this).apply { text = "달력" }
+        val settings = Button(this).apply { text = "설정" }
         val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(20).bold().center()
         val calendarTitle = TextView(this).text(activeCalendarLabel()).size(14).muted()
         val calendarGrid = GridLayout(this).apply {
@@ -228,8 +231,10 @@ class MainActivity : Activity() {
         repeat(42) { index ->
             val date = start.plusDays(index.toLong())
             val dayEvents = eventsForDate(events, date)
+            val holiday = holidayName(date)
             val label = buildString {
                 append(date.dayOfMonth)
+                if (holiday != null) append("\n").append(holiday)
                 if (dayEvents.isNotEmpty()) append("\n").append(dayEvents.first().title.take(8))
                 if (dayEvents.size > 1) append(" +").append(dayEvents.size - 1)
             }
@@ -238,7 +243,7 @@ class MainActivity : Activity() {
                 inMonth = date.month == visibleMonth.month,
                 today = date == LocalDate.now(),
                 selected = date == selectedDate,
-                sunday = date.dayOfWeek.value == 7,
+                sunday = date.dayOfWeek.value == 7 || holiday != null,
                 saturday = date.dayOfWeek.value == 6,
             )
             cell.setOnClickListener {
@@ -456,7 +461,7 @@ class MainActivity : Activity() {
                 val query = input.text.toString().trim()
                 if (query.isNotBlank()) {
                     background(
-                        work = { CalendarApi.searchEvents(calendars.map { it.id }, query, currentUser.id) },
+                        work = { CalendarApi.searchEvents(calendars.map { it.id }, query, currentUser.id, NativeStore.searchMaxDistance(this)) },
                         done = { showSearchResults(it) },
                     )
                 }
@@ -487,19 +492,59 @@ class MainActivity : Activity() {
 
     private fun showCalendarDialog() {
         val currentUser = user ?: return
-        val names = calendars.map { it.name }.toMutableList()
+        val names = calendars.map { "선택: ${it.name}" }.toMutableList()
+        if (selectedCalendarId != null) names.add("초대코드 복사")
+        names.add("검색 임계치 설정 (${NativeStore.searchMaxDistance(this)})")
         names.add("+ 새 달력 만들기")
         AlertDialog.Builder(this)
-            .setTitle("달력 선택")
+            .setTitle("설정")
             .setItems(names.toTypedArray()) { _, index ->
                 if (index < calendars.size) {
                     selectedCalendarId = calendars[index].id
                     showCalendar()
+                } else if (selectedCalendarId != null && index == calendars.size) {
+                    copyInviteCode()
+                } else if (index == calendars.size + if (selectedCalendarId != null) 1 else 0) {
+                    showSearchThresholdDialog()
                 } else {
                     showCreateCalendarDialog(currentUser)
                 }
             }
             .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun copyInviteCode() {
+        val selected = calendars.find { it.id == selectedCalendarId }
+        if (selected == null) {
+            toast("선택된 달력이 없습니다.")
+            return
+        }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("calendar invite code", selected.inviteCode))
+        toast("초대코드를 복사했습니다.")
+    }
+
+    private fun showSearchThresholdDialog() {
+        val input = EditText(this).apply {
+            hint = "0.2"
+            setSingleLine(true)
+            setText(NativeStore.searchMaxDistance(this@MainActivity).toString())
+        }
+        AlertDialog.Builder(this)
+            .setTitle("검색 임계치")
+            .setMessage("낮을수록 더 비슷한 일정만 검색됩니다.")
+            .setView(input)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("저장") { _, _ ->
+                val value = input.text.toString().toDoubleOrNull()
+                if (value == null) {
+                    toast("숫자로 입력해 주세요.")
+                } else {
+                    NativeStore.saveSearchMaxDistance(this, value)
+                    toast("검색 임계치를 저장했습니다.")
+                }
+            }
             .show()
     }
 

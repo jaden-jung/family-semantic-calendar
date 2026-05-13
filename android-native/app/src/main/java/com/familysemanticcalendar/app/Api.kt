@@ -36,6 +36,7 @@ object NativeStore {
     private const val PREFS = "family-calendar-native"
     private const val USER_ID = "user_id"
     private const val DISPLAY_NAME = "display_name"
+    private const val SEARCH_MAX_DISTANCE = "search_max_distance"
 
     fun saveUser(context: Context, user: User) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -50,6 +51,20 @@ object NativeStore {
         val id = prefs.getString(USER_ID, null) ?: return null
         val name = prefs.getString(DISPLAY_NAME, null) ?: return null
         return User(id, name)
+    }
+
+    fun searchMaxDistance(context: Context): Double {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(SEARCH_MAX_DISTANCE, "0.2")
+            ?.toDoubleOrNull()
+            ?.coerceIn(0.0, 2.0) ?: 0.2
+    }
+
+    fun saveSearchMaxDistance(context: Context, value: Double) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(SEARCH_MAX_DISTANCE, value.coerceIn(0.0, 2.0).toString())
+            .apply()
     }
 }
 
@@ -217,6 +232,21 @@ object CalendarApi {
 
 fun eventsForDate(events: List<EventItem>, date: LocalDate): List<EventItem> {
     return events.filter { it.occursOn(date) }.sortedBy { it.startsAt.toLocalTime() }
+}
+
+fun holidayName(date: LocalDate): String? {
+    return when ("%02d-%02d".format(date.monthValue, date.dayOfMonth)) {
+        "01-01" -> "신정"
+        "03-01" -> "삼일절"
+        "05-01" -> "노동절"
+        "05-05" -> "어린이날"
+        "06-06" -> "현충일"
+        "08-15" -> "광복절"
+        "10-03" -> "개천절"
+        "10-09" -> "한글날"
+        "12-25" -> "성탄절"
+        else -> null
+    }
 }
 
 private fun EventItem.occursOn(date: LocalDate): Boolean {
