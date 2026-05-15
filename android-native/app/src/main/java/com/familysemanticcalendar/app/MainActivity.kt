@@ -83,6 +83,11 @@ class MainActivity : Activity() {
                     val dy = event.y - swipeStartY
                     if (gestureAxis == 0 && (kotlin.math.abs(dx) > 14.dp() || kotlin.math.abs(dy) > 14.dp())) {
                         gestureAxis = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) 1 else 2
+                        if (gestureAxis == 2 && !canMoveVertical(dy)) {
+                            gestureAxis = -1
+                            resetGestureTransforms()
+                            return false
+                        }
                     }
                     if (gestureAxis == 1) {
                         moveMonthViews(dx)
@@ -90,13 +95,10 @@ class MainActivity : Activity() {
                         return true
                     }
                     if (gestureAxis == 2) {
-                        if (canMoveVertical(dy)) {
-                            moveVerticalViews(dy)
-                        } else {
-                            resetGestureTransforms()
-                        }
+                        moveVerticalViews(dy)
                         return true
                     }
+                    if (gestureAxis == -1) return false
                 }
                 MotionEvent.ACTION_UP -> {
                     val dx = event.x - swipeStartX
@@ -126,6 +128,10 @@ class MainActivity : Activity() {
                         gestureAxis == 2 -> {
                             animateGestureReset()
                             return true
+                        }
+                        gestureAxis == -1 -> {
+                            gestureAxis = 0
+                            return false
                         }
                     }
                     gestureAxis = 0
@@ -644,25 +650,27 @@ class MainActivity : Activity() {
         }
 
         if (dayEvents.isNotEmpty()) {
-            val dots = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
-            dayEvents.map { calendarColor(it.calendarId) }.distinct().take(4).forEach { color ->
-                dots.addView(View(this).apply {
-                    background = rounded(color, 999.dp())
-                }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
-                    leftMargin = 1.dp()
-                    rightMargin = 1.dp()
-                })
-            }
-            cell.addView(dots, matchWrap(top = 2))
-
-            if (!listExpanded) {
+            if (listExpanded) {
+                val dots = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                }
+                dayEvents.map { calendarColor(it.calendarId) }.distinct().take(4).forEach { color ->
+                    dots.addView(View(this).apply {
+                        background = rounded(color, 999.dp())
+                    }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
+                        leftMargin = 1.dp()
+                        rightMargin = 1.dp()
+                    })
+                }
+                cell.addView(dots, matchWrap(top = 2))
+            } else {
                 val first = dayEvents.first()
                 cell.addView(TextView(this).text(first.title.take(7)).size(9).center().apply {
                     setTextColor(slate900)
                     maxLines = 1
+                    background = rounded(softCalendarColor(calendarColor(first.calendarId)), 5.dp())
+                    setPadding(3.dp(), 1.dp(), 3.dp(), 1.dp())
                 }, matchWrap(top = 1))
             }
         }
@@ -1352,6 +1360,13 @@ private fun Button.eventButton(): Button = apply {
 private fun calendarColor(calendarId: String): Int {
     val index = kotlin.math.abs(calendarId.hashCode()) % calendarPalette.size
     return calendarPalette[index]
+}
+private fun softCalendarColor(color: Int): Int {
+    return Color.rgb(
+        (Color.red(color) * 0.14f + 255 * 0.86f).toInt(),
+        (Color.green(color) * 0.14f + 255 * 0.86f).toInt(),
+        (Color.blue(color) * 0.14f + 255 * 0.86f).toInt(),
+    )
 }
 private fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = top }
 private fun wrapCenter(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
