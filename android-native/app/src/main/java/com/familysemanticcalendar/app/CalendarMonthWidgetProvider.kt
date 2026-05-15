@@ -21,7 +21,7 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                     "Open app and sign in first."
                 } else {
                     val calendars = CalendarApi.listCalendars(user.id)
-                    val events = calendars.flatMap { CalendarApi.listEvents(it.id, user.id) }
+                    val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
                     monthBody(events)
                 }
             } catch (error: Exception) {

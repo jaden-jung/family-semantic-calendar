@@ -39,6 +39,8 @@ object NativeStore {
     private const val USER_ID = "user_id"
     private const val DISPLAY_NAME = "display_name"
     private const val SEARCH_MAX_DISTANCE = "search_max_distance"
+    private const val DEFAULT_CALENDAR_ID = "default_calendar_id"
+    private const val VISIBLE_CALENDAR_IDS = "visible_calendar_ids"
 
     fun saveUser(context: Context, user: User) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -68,6 +70,36 @@ object NativeStore {
             .putString(SEARCH_MAX_DISTANCE, value.coerceIn(0.0, 2.0).toString())
             .apply()
     }
+
+    fun defaultCalendarId(context: Context): String? {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(DEFAULT_CALENDAR_ID, null)
+    }
+
+    fun saveDefaultCalendarId(context: Context, calendarId: String?) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .apply {
+                if (calendarId == null) remove(DEFAULT_CALENDAR_ID) else putString(DEFAULT_CALENDAR_ID, calendarId)
+            }
+            .apply()
+    }
+
+    fun visibleCalendarIds(context: Context): Set<String> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(VISIBLE_CALENDAR_IDS, "").orEmpty()
+        return raw.split("|").filter { it.isNotBlank() }.toSet()
+    }
+
+    fun saveVisibleCalendarIds(context: Context, calendarIds: Set<String>) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(VISIBLE_CALENDAR_IDS, calendarIds.joinToString("|"))
+            .apply()
+    }
+}
+
+fun visibleCalendarsFor(context: Context, calendars: List<CalendarItem>): List<CalendarItem> {
+    val saved = NativeStore.visibleCalendarIds(context)
+    return calendars.filter { saved.contains(it.id) }.ifEmpty { calendars }
 }
 
 object CalendarApi {

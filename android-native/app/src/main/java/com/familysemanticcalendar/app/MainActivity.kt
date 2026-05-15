@@ -304,14 +304,23 @@ class MainActivity : Activity() {
             work = {
                 calendars = CalendarApi.listCalendars(currentUser.id)
                 val calendarIds = calendars.map { it.id }.toSet()
-                visibleCalendarIds = if (visibleCalendarIds.isEmpty()) {
+                val savedVisible = NativeStore.visibleCalendarIds(this)
+                visibleCalendarIds = if (visibleCalendarIds.isEmpty() && savedVisible.isNotEmpty()) {
+                    savedVisible.intersect(calendarIds).ifEmpty { calendarIds }
+                } else if (visibleCalendarIds.isEmpty()) {
                     calendarIds
                 } else {
                     visibleCalendarIds.intersect(calendarIds).ifEmpty { calendarIds }
                 }
-                if (selectedCalendarId == null || calendars.none { it.id == selectedCalendarId }) {
-                    selectedCalendarId = calendars.firstOrNull()?.id
+                val savedDefault = NativeStore.defaultCalendarId(this)
+                if (selectedCalendarId == null && savedDefault != null && calendars.any { it.id == savedDefault }) {
+                    selectedCalendarId = savedDefault
                 }
+                if (selectedCalendarId == null || calendars.none { it.id == selectedCalendarId }) {
+                    selectedCalendarId = visibleCalendars().firstOrNull()?.id ?: calendars.firstOrNull()?.id
+                }
+                NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
+                NativeStore.saveDefaultCalendarId(this, selectedCalendarId)
                 members = CalendarApi.listUsers(currentUser.id)
                 events = visibleCalendars().flatMap { CalendarApi.listEvents(it.id, currentUser.id) }
             },
@@ -720,6 +729,8 @@ class MainActivity : Activity() {
                 } else {
                     visibleCalendarIds = selected
                     if (selectedCalendarId !in visibleCalendarIds) selectedCalendarId = visibleCalendars().firstOrNull()?.id
+                    NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
+                    NativeStore.saveDefaultCalendarId(this, selectedCalendarId)
                     reloadCalendar()
                 }
             }
@@ -738,6 +749,8 @@ class MainActivity : Activity() {
             .setSingleChoiceItems(names, selectedIndex) { dialog, which ->
                 selectedCalendarId = calendars[which].id
                 if (selectedCalendarId !in visibleCalendarIds) visibleCalendarIds = visibleCalendarIds + selectedCalendarId!!
+                NativeStore.saveDefaultCalendarId(this, selectedCalendarId)
+                NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
                 dialog.dismiss()
                 showCalendar()
             }
@@ -795,6 +808,9 @@ class MainActivity : Activity() {
                         work = { CalendarApi.createCalendar(name, currentUser.id) },
                         done = {
                             selectedCalendarId = it.id
+                            visibleCalendarIds = visibleCalendarIds + it.id
+                            NativeStore.saveDefaultCalendarId(this, it.id)
+                            NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
                             reloadCalendar()
                         },
                     )
@@ -819,6 +835,9 @@ class MainActivity : Activity() {
                         work = { CalendarApi.joinCalendar(inviteCode, currentUser.id) },
                         done = {
                             selectedCalendarId = it.id
+                            visibleCalendarIds = visibleCalendarIds + it.id
+                            NativeStore.saveDefaultCalendarId(this, it.id)
+                            NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
                             reloadCalendar()
                         },
                     )

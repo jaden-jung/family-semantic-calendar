@@ -21,7 +21,7 @@ class CalendarWidgetProvider : AppWidgetProvider() {
                 } else {
                     val calendars = CalendarApi.listCalendars(user.id)
                     val members = CalendarApi.listUsers(user.id)
-                    val events = calendars.flatMap { CalendarApi.listEvents(it.id, user.id) }
+                    val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
                     appWidgetIds.associateWith { widgetId ->
                         val options = appWidgetManager.getAppWidgetOptions(widgetId)
                         val maxItems = if (options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110) >= 180) 8 else 4
