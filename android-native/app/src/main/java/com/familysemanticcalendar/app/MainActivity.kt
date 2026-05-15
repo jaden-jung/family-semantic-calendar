@@ -821,8 +821,10 @@ class MainActivity : Activity() {
 
     private fun refreshWidgets() {
         val manager = AppWidgetManager.getInstance(this)
-        val component = ComponentName(this, CalendarWidgetProvider::class.java)
-        CalendarWidgetProvider().onUpdate(this, manager, manager.getAppWidgetIds(component))
+        val agendaComponent = ComponentName(this, CalendarWidgetProvider::class.java)
+        CalendarWidgetProvider().onUpdate(this, manager, manager.getAppWidgetIds(agendaComponent))
+        val monthComponent = ComponentName(this, CalendarMonthWidgetProvider::class.java)
+        CalendarMonthWidgetProvider().onUpdate(this, manager, manager.getAppWidgetIds(monthComponent))
     }
 
     private fun <T> background(work: () -> T, done: (T) -> Unit = {}, failed: () -> Unit = {}) {
