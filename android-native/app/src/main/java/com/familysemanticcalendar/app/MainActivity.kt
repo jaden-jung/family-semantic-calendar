@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -55,6 +56,7 @@ class MainActivity : Activity() {
     private var swipeStartX = 0f
     private var swipeStartY = 0f
     private var listExpanded = false
+    private var monthTransitionDirection = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,7 +76,8 @@ class MainActivity : Activity() {
                     val dy = event.y - swipeStartY
                     when {
                         kotlin.math.abs(dx) > 70.dp() && kotlin.math.abs(dx) >= kotlin.math.abs(dy) -> {
-                            visibleMonth = if (dx < 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                            monthTransitionDirection = if (dx < 0) 1 else -1
+                            visibleMonth = if (monthTransitionDirection > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
                             showCalendar()
                             return true
                         }
@@ -247,10 +250,12 @@ class MainActivity : Activity() {
         val progress = ProgressBar(this).apply { visibility = if (loading) View.VISIBLE else View.GONE }
 
         prev.setOnClickListener {
+            monthTransitionDirection = -1
             visibleMonth = visibleMonth.minusMonths(1)
             showCalendar()
         }
         next.setOnClickListener {
+            monthTransitionDirection = 1
             visibleMonth = visibleMonth.plusMonths(1)
             showCalendar()
         }
@@ -294,6 +299,26 @@ class MainActivity : Activity() {
             bottomMargin = systemBarBottomPadding() + 18.dp()
         })
         setContentView(frame)
+        playMonthTransition(calendarGrid, listPanel)
+    }
+
+    private fun playMonthTransition(vararg views: View) {
+        val direction = monthTransitionDirection
+        if (direction == 0) return
+        monthTransitionDirection = 0
+        views.forEach { view ->
+            view.post {
+                val distance = view.rootView.width.coerceAtLeast(resources.displayMetrics.widthPixels) * 0.22f * direction
+                view.translationX = distance
+                view.alpha = 0.72f
+                view.animate()
+                    .translationX(0f)
+                    .alpha(1f)
+                    .setDuration(230L)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+        }
     }
 
     private fun showMonthPicker() {
