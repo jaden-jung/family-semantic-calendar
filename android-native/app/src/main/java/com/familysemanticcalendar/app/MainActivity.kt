@@ -73,12 +73,12 @@ class MainActivity : Activity() {
                     val dx = event.x - swipeStartX
                     val dy = event.y - swipeStartY
                     when {
-                        kotlin.math.abs(dx) > 90.dp() && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.4f -> {
+                        kotlin.math.abs(dx) > 70.dp() && kotlin.math.abs(dx) >= kotlin.math.abs(dy) -> {
                             visibleMonth = if (dx < 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
                             showCalendar()
                             return true
                         }
-                        kotlin.math.abs(dy) > 90.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.4f -> {
+                        kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             listExpanded = dy < 0
                             showCalendar()
                             return true
@@ -195,7 +195,9 @@ class MainActivity : Activity() {
     private fun showCalendar(loading: Boolean = false) {
         val frame = FrameLayout(this)
         frame.setBackgroundColor(screenBg)
-        val root = LinearLayout(this).vertical().withPadding(12.dp())
+        val root = LinearLayout(this).vertical().apply {
+            setPadding(12.dp(), systemBarTopPadding() + 10.dp(), 12.dp(), systemBarBottomPadding() + 12.dp())
+        }
         root.setBackgroundColor(screenBg)
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -233,11 +235,7 @@ class MainActivity : Activity() {
             setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
         }
         val listTitle = TextView(this).text("${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정").size(18).bold().apply { setTextColor(slate900) }
-        val listHint = TextView(this).text(if (listExpanded) "아래로 밀면 달력을 크게 봅니다" else "위로 밀면 일정을 크게 봅니다").size(12).apply {
-            setTextColor(0xFF64748B.toInt())
-        }
         val eventList = LinearLayout(this).vertical()
-        eventList.minimumHeight = if (listExpanded) 300.dp() else 96.dp()
         val listPanel = LinearLayout(this).vertical().apply {
             background = rounded(Color.WHITE, 14.dp(), 0xFFE2E8F0.toInt())
             setPadding(14.dp(), 12.dp(), 14.dp(), 14.dp())
@@ -275,21 +273,25 @@ class MainActivity : Activity() {
         root.addView(secondRow, matchWrap(top = 8))
         root.addView(calendarGrid, matchWrap(top = 10))
         listHeader.addView(listTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        listHeader.addView(listHint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         listPanel.addView(listHeader, matchWrap())
-        listPanel.addView(eventList, matchWrap(top = 8))
-        root.addView(listPanel, matchWrap(top = 12))
+        listPanel.addView(ScrollView(this).apply {
+            isFillViewport = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(eventList)
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+            topMargin = 8.dp()
+        })
+        root.addView(listPanel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f).apply {
+            topMargin = 12.dp()
+        })
         root.addView(progress, wrapCenter(top = 8))
 
         drawCalendar(calendarGrid)
         drawEventList(eventList, listTitle)
-        val scroll = ScrollView(this).apply {
-            addView(root)
-        }
-        frame.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        frame.addView(root, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
             rightMargin = 18.dp()
-            bottomMargin = 22.dp()
+            bottomMargin = systemBarBottomPadding() + 18.dp()
         })
         setContentView(frame)
     }
@@ -384,7 +386,7 @@ class MainActivity : Activity() {
                 visibleMonth = YearMonth.from(date)
                 showCalendar()
             }
-            grid.addView(cell, cellParams(if (listExpanded) 48 else 78))
+            grid.addView(cell, cellParams(if (listExpanded) 36 else 62))
         }
     }
 
@@ -1032,6 +1034,16 @@ class MainActivity : Activity() {
     }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+
+    private fun systemBarTopPadding(): Int {
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    private fun systemBarBottomPadding(): Int {
+        val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
 }
 
 private val teal = 0xFF0F766E.toInt()
