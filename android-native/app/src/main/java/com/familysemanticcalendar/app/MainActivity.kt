@@ -10,6 +10,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
@@ -83,19 +86,22 @@ class MainActivity : Activity() {
     }
 
     private fun showLogin() {
-        val root = LinearLayout(this).vertical().withPadding(28)
+        val root = LinearLayout(this).vertical().withPadding(28.dp())
         root.gravity = Gravity.CENTER_VERTICAL
+        root.setBackgroundColor(screenBg)
 
-        val title = TextView(this).text("Family Calendar Native").size(26).bold()
+        val title = TextView(this).text("Family Calendar Native").size(26).bold().apply { setTextColor(slate900) }
         val nameInput = EditText(this).apply {
             hint = "사용자 이름"
             setSingleLine(true)
+            background = rounded(Color.WHITE, 10.dp(), strokeColor = borderColor)
+            setPadding(14.dp(), 0, 14.dp(), 0)
         }
         val usersRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START
         }
-        val signInButton = Button(this).apply { text = "기존 사용자 로그인" }
+        val signInButton = Button(this).apply { text = "기존 사용자 로그인" }.primaryButton()
         val progress = ProgressBar(this).apply { visibility = View.GONE }
 
         root.addView(title, matchWrap())
@@ -139,6 +145,7 @@ class MainActivity : Activity() {
                 users.forEach { found ->
                     usersRow.addView(Button(this).apply {
                         text = found.displayName
+                        compactButton()
                         setOnClickListener { nameInput.setText(found.displayName) }
                     }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         rightMargin = 8
@@ -150,7 +157,8 @@ class MainActivity : Activity() {
     }
 
     private fun showCalendar(loading: Boolean = false) {
-        val root = LinearLayout(this).vertical().withPadding(10)
+        val root = LinearLayout(this).vertical().withPadding(12.dp())
+        root.setBackgroundColor(screenBg)
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -159,18 +167,23 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val prev = Button(this).apply { text = "<" }
-        val next = Button(this).apply { text = ">" }
-        val add = Button(this).apply { text = "+ 일정" }
-        val search = Button(this).apply { text = "검색" }
-        val settings = Button(this).apply { text = "설정" }
-        val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(20).bold().center()
-        val calendarTitle = TextView(this).text(activeCalendarLabel()).size(14).muted()
+        val prev = Button(this).apply { text = "<" }.navButton()
+        val next = Button(this).apply { text = ">" }.navButton()
+        val add = Button(this).apply { text = "+ 일정" }.primaryButton()
+        val search = Button(this).apply { text = "검색" }.secondaryButton()
+        val settings = Button(this).apply { text = "설정" }.secondaryButton()
+        val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(22).bold().center().apply { setTextColor(slate900) }
+        val calendarTitle = TextView(this).text(activeCalendarLabel()).size(14).muted().apply {
+            background = rounded(0xFFEFF6FF.toInt(), 999.dp())
+            setPadding(12.dp(), 7.dp(), 12.dp(), 7.dp())
+        }
         val calendarGrid = GridLayout(this).apply {
             columnCount = 7
             rowCount = 7
+            background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
+            setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
         }
-        val listTitle = TextView(this).text("${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정").size(16).bold()
+        val listTitle = TextView(this).text("${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정").size(18).bold().apply { setTextColor(slate900) }
         val eventList = LinearLayout(this).vertical()
         val progress = ProgressBar(this).apply { visibility = if (loading) View.VISIBLE else View.GONE }
 
@@ -186,17 +199,17 @@ class MainActivity : Activity() {
         search.setOnClickListener { showSearchDialog() }
         settings.setOnClickListener { showCalendarDialog() }
 
-        top.addView(prev, LinearLayout.LayoutParams(64, LinearLayout.LayoutParams.WRAP_CONTENT))
+        top.addView(prev, LinearLayout.LayoutParams(48.dp(), 42.dp()))
         top.addView(monthTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(next, LinearLayout.LayoutParams(64, LinearLayout.LayoutParams.WRAP_CONTENT))
+        top.addView(next, LinearLayout.LayoutParams(48.dp(), 42.dp()))
         secondRow.addView(add, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         secondRow.addView(search, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         secondRow.addView(settings, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, matchWrap())
         root.addView(calendarTitle, matchWrap(top = 4))
         root.addView(secondRow, matchWrap(top = 8))
-        root.addView(calendarGrid, matchWrap(top = 8))
-        root.addView(listTitle, matchWrap(top = 12))
+        root.addView(calendarGrid, matchWrap(top = 10))
+        root.addView(listTitle, matchWrap(top = 16))
         root.addView(eventList, matchWrap(top = 6))
         root.addView(progress, wrapCenter(top = 8))
 
@@ -272,6 +285,7 @@ class MainActivity : Activity() {
             container.addView(Button(this).apply {
                 text = "$time  [$owner] ${event.title}$endText"
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                eventButton()
                 setOnClickListener { showEventDialog(event) }
             }, matchWrap(top = 4))
         }
@@ -629,7 +643,8 @@ class MainActivity : Activity() {
         return TextView(this).apply {
             text = value
             textSize = if (header) 13f else 12f
-            gravity = Gravity.CENTER
+            gravity = if (header) Gravity.CENTER else Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            setPadding(3.dp(), if (header) 0 else 5.dp(), 3.dp(), 3.dp())
             setTextColor(
                 when {
                     sunday -> 0xFFDC2626.toInt()
@@ -638,13 +653,17 @@ class MainActivity : Activity() {
                     else -> 0xFF94A3B8.toInt()
                 }
             )
-            if (header) setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setBackgroundColor(
-                when {
+            if (header) setTypeface(typeface, Typeface.BOLD)
+            background = rounded(
+                fillColor = when {
                     selected -> 0xFFD1FAE5.toInt()
                     today -> 0xFFFEF3C7.toInt()
-                    else -> 0xFFFFFFFF.toInt()
-                }
+                    !inMonth -> 0xFFF1F5F9.toInt()
+                    else -> Color.WHITE
+                },
+                radius = if (header) 0 else 8.dp(),
+                strokeColor = if (selected) teal else 0xFFE2E8F0.toInt(),
+                strokeWidth = if (selected) 2.dp() else 1
             )
         }
     }
@@ -672,13 +691,60 @@ class MainActivity : Activity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 }
 
+private val teal = 0xFF0F766E.toInt()
+private val tealSoft = 0xFFE6FFFA.toInt()
+private val slate900 = 0xFF0F172A.toInt()
+private val slate600 = 0xFF475569.toInt()
+private val borderColor = 0xFFCBD5E1.toInt()
+private val screenBg = 0xFFF7FAF9.toInt()
+
+private fun Int.dp(): Int = (this * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 private fun LinearLayout.vertical(): LinearLayout = apply { orientation = LinearLayout.VERTICAL }
 private fun <T : View> T.withPadding(size: Int): T = apply { setPadding(size, size, size, size) }
 private fun TextView.text(value: String): TextView = apply { text = value }
 private fun TextView.size(value: Int): TextView = apply { textSize = value.toFloat() }
-private fun TextView.bold(): TextView = apply { setTypeface(typeface, android.graphics.Typeface.BOLD) }
+private fun TextView.bold(): TextView = apply { setTypeface(typeface, Typeface.BOLD) }
 private fun TextView.center(): TextView = apply { gravity = Gravity.CENTER }
 private fun TextView.muted(): TextView = apply { setTextColor(0xFF64748B.toInt()) }
+private fun rounded(fillColor: Int, radius: Int, strokeColor: Int? = null, strokeWidth: Int = 1): GradientDrawable {
+    return GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = radius.toFloat()
+        setColor(fillColor)
+        if (strokeColor != null) setStroke(strokeWidth, strokeColor)
+    }
+}
+private fun Button.primaryButton(): Button = apply {
+    setTextColor(Color.WHITE)
+    setTypeface(typeface, Typeface.BOLD)
+    background = rounded(teal, 8.dp())
+    minHeight = 42.dp()
+}
+private fun Button.secondaryButton(): Button = apply {
+    setTextColor(slate900)
+    setTypeface(typeface, Typeface.BOLD)
+    background = rounded(0xFFE2E8F0.toInt(), 8.dp())
+    minHeight = 42.dp()
+}
+private fun Button.navButton(): Button = apply {
+    setTextColor(slate900)
+    textSize = 18f
+    setTypeface(typeface, Typeface.BOLD)
+    background = rounded(Color.WHITE, 999.dp(), borderColor)
+    minHeight = 40.dp()
+}
+private fun Button.compactButton(): Button = apply {
+    setTextColor(teal)
+    background = rounded(tealSoft, 999.dp(), 0xFF99F6E4.toInt())
+    minHeight = 34.dp()
+}
+private fun Button.eventButton(): Button = apply {
+    setTextColor(slate900)
+    textSize = 14f
+    background = rounded(Color.WHITE, 8.dp(), 0xFFE2E8F0.toInt())
+    minHeight = 44.dp()
+    setPadding(12.dp(), 0, 12.dp(), 0)
+}
 private fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = top }
 private fun wrapCenter(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
     topMargin = top
@@ -686,7 +752,7 @@ private fun wrapCenter(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.La
 }
 private fun cellParams(height: Int) = GridLayout.LayoutParams().apply {
     width = 0
-    this.height = height
+    this.height = height.dp()
     columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-    setMargins(1, 1, 1, 1)
+    setMargins(2.dp(), 2.dp(), 2.dp(), 2.dp())
 }
