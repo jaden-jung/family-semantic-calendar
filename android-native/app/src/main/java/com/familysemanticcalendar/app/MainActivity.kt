@@ -49,6 +49,7 @@ class MainActivity : Activity() {
     private var calendars: List<CalendarItem> = emptyList()
     private var members: List<User> = emptyList()
     private var selectedCalendarId: String? = null
+    private var visibleCalendarIds: Set<String> = emptySet()
     private var events: List<EventItem> = emptyList()
     private var swipeStartX = 0f
     private var swipeStartY = 0f
@@ -302,11 +303,17 @@ class MainActivity : Activity() {
         background(
             work = {
                 calendars = CalendarApi.listCalendars(currentUser.id)
+                val calendarIds = calendars.map { it.id }.toSet()
+                visibleCalendarIds = if (visibleCalendarIds.isEmpty()) {
+                    calendarIds
+                } else {
+                    visibleCalendarIds.intersect(calendarIds).ifEmpty { calendarIds }
+                }
                 if (selectedCalendarId == null || calendars.none { it.id == selectedCalendarId }) {
                     selectedCalendarId = calendars.firstOrNull()?.id
                 }
                 members = CalendarApi.listUsers(currentUser.id)
-                events = calendars.flatMap { CalendarApi.listEvents(it.id, currentUser.id) }
+                events = visibleCalendars().flatMap { CalendarApi.listEvents(it.id, currentUser.id) }
             },
             done = {
                 refreshWidgets()
@@ -638,7 +645,7 @@ class MainActivity : Activity() {
                 val query = input.text.toString().trim()
                 if (query.isNotBlank()) {
                     background(
-                        work = { CalendarApi.searchEvents(calendars.map { it.id }, query, currentUser.id, NativeStore.searchMaxDistance(this)) },
+                        work = { CalendarApi.searchEvents(visibleCalendars().map { it.id }, query, currentUser.id, NativeStore.searchMaxDistance(this)) },
                         done = { showSearchResults(it) },
                     )
                 }
@@ -669,7 +676,10 @@ class MainActivity : Activity() {
 
     private fun showCalendarDialog() {
         val currentUser = user ?: return
-        val names = calendars.map { "선택: ${it.name}" }.toMutableList()
+        val names = mutableListOf(
+            "표시 달력 선택",
+            "기본 등록 달력 선택",
+        )
         if (selectedCalendarId != null) names.add("초대코드 복사")
         names.add("검색 임계치 설정 (${NativeStore.searchMaxDistance(this)})")
         names.add("초대코드로 참여")
@@ -677,20 +687,61 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("설정")
             .setItems(names.toTypedArray()) { _, index ->
-                if (index < calendars.size) {
-                    selectedCalendarId = calendars[index].id
-                    showCalendar()
-                } else if (selectedCalendarId != null && index == calendars.size) {
-                    copyInviteCode()
-                } else if (index == calendars.size + if (selectedCalendarId != null) 1 else 0) {
-                    showSearchThresholdDialog()
-                } else if (index == calendars.size + if (selectedCalendarId != null) 2 else 1) {
-                    showJoinCalendarDialog(currentUser)
-                } else {
-                    showCreateCalendarDialog(currentUser)
+                when (names[index]) {
+                    "표시 달력 선택" -> showVisibleCalendarsDialog()
+                    "기본 등록 달력 선택" -> showDefaultCalendarDialog()
+                    "초대코드 복사" -> copyInviteCode()
+                    "초대코드로 참여" -> showJoinCalendarDialog(currentUser)
+                    "+ 새 달력 만들기" -> showCreateCalendarDialog(currentUser)
+                    else -> showSearchThresholdDialog()
                 }
             }
             .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun showVisibleCalendarsDialog() {
+        if (calendars.isEmpty()) {
+            toast("참여 중인 달력이 없습니다.")
+            return
+        }
+        val names = calendars.map { it.name }.toTypedArray()
+        val checked = calendars.map { visibleCalendarIds.contains(it.id) }.toBooleanArray()
+        AlertDialog.Builder(this)
+            .setTitle("표시 달력 선택")
+            .setMultiChoiceItems(names, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setNegativeButton("취소", null)
+            .setPositiveButton("적용") { _, _ ->
+                val selected = calendars.filterIndexed { index, _ -> checked[index] }.map { it.id }.toSet()
+                if (selected.isEmpty()) {
+                    toast("하나 이상 선택해 주세요.")
+                } else {
+                    visibleCalendarIds = selected
+                    if (selectedCalendarId !in visibleCalendarIds) selectedCalendarId = visibleCalendars().firstOrNull()?.id
+                    reloadCalendar()
+                }
+            }
+            .show()
+    }
+
+    private fun showDefaultCalendarDialog() {
+        if (calendars.isEmpty()) {
+            toast("참여 중인 달력이 없습니다.")
+            return
+        }
+        val names = calendars.map { it.name }.toTypedArray()
+        val selectedIndex = calendars.indexOfFirst { it.id == selectedCalendarId }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("기본 등록 달력")
+            .setSingleChoiceItems(names, selectedIndex) { dialog, which ->
+                selectedCalendarId = calendars[which].id
+                if (selectedCalendarId !in visibleCalendarIds) visibleCalendarIds = visibleCalendarIds + selectedCalendarId!!
+                dialog.dismiss()
+                showCalendar()
+            }
+            .setNegativeButton("취소", null)
             .show()
     }
 
@@ -778,8 +829,14 @@ class MainActivity : Activity() {
 
     private fun activeCalendarLabel(): String {
         if (calendars.isEmpty()) return "참여 중인 달력이 없습니다."
+        val visible = visibleCalendars()
+        if (visible.size > 1) return "${visible.size}개 달력 표시 중"
         val selected = calendars.find { it.id == selectedCalendarId }
         return selected?.name ?: "${calendars.size}개 달력"
+    }
+
+    private fun visibleCalendars(): List<CalendarItem> {
+        return calendars.filter { visibleCalendarIds.contains(it.id) }.ifEmpty { calendars }
     }
 
     private fun dayText(
