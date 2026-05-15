@@ -49,13 +49,17 @@ class CalendarWidgetProvider : AppWidgetProvider() {
         for (offset in 0..7) {
             val date = today.plusDays(offset.toLong())
             val dayEvents = eventsForDate(events, date)
-            dayEvents.forEach { event ->
+            if (dayEvents.isNotEmpty()) {
                 val prefix = when (offset) {
-                    0 -> "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
+                    0 -> "오늘"
                     1 -> "내일"
                     else -> "${date.monthValue}/${date.dayOfMonth}"
                 }
-                rows.add("$prefix [${ownerName(members, event.createdBy)}] ${event.title}")
+                val dayText = dayEvents.take(2).joinToString(", ") { event ->
+                    "[${ownerName(members, event.createdBy)}] ${event.title}"
+                }
+                val more = if (dayEvents.size > 2) " 외 ${dayEvents.size - 2}" else ""
+                rows.add("$prefix  $dayText$more")
             }
             if (rows.size >= maxItems) break
         }

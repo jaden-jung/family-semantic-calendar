@@ -260,14 +260,10 @@ class MainActivity : Activity() {
             val date = start.plusDays(index.toLong())
             val dayEvents = eventsForDate(events, date)
             val holiday = holidayName(date)
-            val label = buildString {
-                append(date.dayOfMonth)
-                if (holiday != null) append("\n").append(holiday)
-                if (dayEvents.isNotEmpty()) append("\n").append(dayEvents.first().title.take(8))
-                if (dayEvents.size > 1) append(" +").append(dayEvents.size - 1)
-            }
-            val cell = dayText(
-                value = label,
+            val cell = dayCell(
+                date = date,
+                holiday = holiday,
+                dayEvents = dayEvents,
                 inMonth = date.month == visibleMonth.month,
                 today = date == LocalDate.now(),
                 selected = date == selectedDate,
@@ -283,6 +279,71 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun dayCell(
+        date: LocalDate,
+        holiday: String?,
+        dayEvents: List<EventItem>,
+        inMonth: Boolean,
+        today: Boolean,
+        selected: Boolean,
+        sunday: Boolean,
+        saturday: Boolean,
+    ): LinearLayout {
+        val cell = LinearLayout(this).vertical()
+        cell.gravity = Gravity.CENTER_HORIZONTAL
+        cell.setPadding(4.dp(), 5.dp(), 4.dp(), 3.dp())
+        cell.background = rounded(
+            fillColor = when {
+                selected -> 0xFFD1FAE5.toInt()
+                today -> 0xFFFEF3C7.toInt()
+                !inMonth -> 0xFFF1F5F9.toInt()
+                else -> Color.WHITE
+            },
+            radius = 8.dp(),
+            strokeColor = if (selected) teal else 0xFFE2E8F0.toInt(),
+            strokeWidth = if (selected) 2.dp() else 1,
+        )
+
+        val number = TextView(this).text(date.dayOfMonth.toString()).size(12).bold().center().apply {
+            setTextColor(
+                when {
+                    sunday || holiday != null -> 0xFFDC2626.toInt()
+                    saturday -> 0xFF2563EB.toInt()
+                    inMonth -> slate900
+                    else -> 0xFF94A3B8.toInt()
+                }
+            )
+        }
+        cell.addView(number, matchWrap())
+
+        if (holiday != null) {
+            cell.addView(TextView(this).text(holiday.take(4)).size(9).center().apply { setTextColor(0xFFDC2626.toInt()) }, matchWrap())
+        }
+
+        if (dayEvents.isNotEmpty()) {
+            val dots = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            dayEvents.map { calendarColor(it.calendarId) }.distinct().take(4).forEach { color ->
+                dots.addView(View(this).apply {
+                    background = rounded(color, 999.dp())
+                }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
+                    leftMargin = 1.dp()
+                    rightMargin = 1.dp()
+                })
+            }
+            cell.addView(dots, matchWrap(top = 2))
+
+            val first = dayEvents.first()
+            cell.addView(TextView(this).text(first.title.take(7)).size(9).center().apply {
+                setTextColor(slate900)
+                maxLines = 1
+            }, matchWrap(top = 1))
+        }
+        return cell
+    }
+
     private fun drawEventList(container: LinearLayout, title: TextView) {
         container.removeAllViews()
         title.text = "${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정"
@@ -296,14 +357,21 @@ class MainActivity : Activity() {
             val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
             val owner = ownerName(members, event.createdBy)
             val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
                 setPadding(12.dp(), 9.dp(), 12.dp(), 9.dp())
                 setOnClickListener { showEventDialog(event) }
             }
-            row.addView(TextView(this).text(event.title).size(15).bold().apply { setTextColor(slate900) }, matchWrap())
-            row.addView(TextView(this).text("$time  [$owner]$endText").size(12).apply { setTextColor(slate600) }, matchWrap(top = 2))
-            if (event.location.isNotBlank()) row.addView(TextView(this).text(event.location).size(12).muted(), matchWrap(top = 2))
+            row.addView(View(this).apply {
+                background = rounded(calendarColor(event.calendarId), 999.dp())
+            }, LinearLayout.LayoutParams(5.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
+                rightMargin = 10.dp()
+            })
+            val texts = LinearLayout(this).vertical()
+            texts.addView(TextView(this).text(event.title).size(15).bold().apply { setTextColor(slate900) }, matchWrap())
+            texts.addView(TextView(this).text("$time  [$owner]$endText").size(12).apply { setTextColor(slate600) }, matchWrap(top = 2))
+            if (event.location.isNotBlank()) texts.addView(TextView(this).text(event.location).size(12).muted(), matchWrap(top = 2))
+            row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             container.addView(row, matchWrap(top = 6))
         }
     }
@@ -714,6 +782,14 @@ private val slate900 = 0xFF0F172A.toInt()
 private val slate600 = 0xFF475569.toInt()
 private val borderColor = 0xFFCBD5E1.toInt()
 private val screenBg = 0xFFF7FAF9.toInt()
+private val calendarPalette = listOf(
+    0xFF0F766E.toInt(),
+    0xFF2563EB.toInt(),
+    0xFFC2410C.toInt(),
+    0xFF7C3AED.toInt(),
+    0xFFBE123C.toInt(),
+    0xFF15803D.toInt(),
+)
 
 private fun Int.dp(): Int = (this * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 private fun LinearLayout.vertical(): LinearLayout = apply { orientation = LinearLayout.VERTICAL }
@@ -761,6 +837,10 @@ private fun Button.eventButton(): Button = apply {
     background = rounded(Color.WHITE, 8.dp(), 0xFFE2E8F0.toInt())
     minHeight = 44.dp()
     setPadding(12.dp(), 0, 12.dp(), 0)
+}
+private fun calendarColor(calendarId: String): Int {
+    val index = kotlin.math.abs(calendarId.hashCode()) % calendarPalette.size
+    return calendarPalette[index]
 }
 private fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = top }
 private fun wrapCenter(top: Int = 0) = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
