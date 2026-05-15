@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
@@ -24,6 +25,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.LinearLayout
+import android.widget.NumberPicker
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -48,6 +50,8 @@ class MainActivity : Activity() {
     private var members: List<User> = emptyList()
     private var selectedCalendarId: String? = null
     private var events: List<EventItem> = emptyList()
+    private var swipeStartX = 0f
+    private var swipeStartY = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -174,6 +178,7 @@ class MainActivity : Activity() {
         val next = Button(this).apply { text = ">" }.navButton()
         val search = Button(this).apply { text = "검색" }.secondaryButton()
         val settings = Button(this).apply { text = "설정" }.secondaryButton()
+        val today = Button(this).apply { text = "오늘" }.secondaryButton()
         val addFab = TextView(this).text("+").center().apply {
             textSize = 30f
             setTextColor(Color.WHITE)
@@ -182,7 +187,10 @@ class MainActivity : Activity() {
             elevation = 8.dp().toFloat()
             setOnClickListener { showEventDialog() }
         }
-        val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(22).bold().center().apply { setTextColor(slate900) }
+        val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(22).bold().center().apply {
+            setTextColor(slate900)
+            setOnClickListener { showMonthPicker() }
+        }
         val calendarTitle = TextView(this).text(activeCalendarLabel()).size(14).muted().apply {
             background = rounded(0xFFEFF6FF.toInt(), 999.dp())
             setPadding(12.dp(), 7.dp(), 12.dp(), 7.dp())
@@ -207,10 +215,16 @@ class MainActivity : Activity() {
         }
         search.setOnClickListener { showSearchDialog() }
         settings.setOnClickListener { showCalendarDialog() }
+        today.setOnClickListener {
+            selectedDate = LocalDate.now()
+            visibleMonth = YearMonth.now()
+            showCalendar()
+        }
 
         top.addView(prev, LinearLayout.LayoutParams(48.dp(), 42.dp()))
         top.addView(monthTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         top.addView(next, LinearLayout.LayoutParams(48.dp(), 42.dp()))
+        secondRow.addView(today, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         secondRow.addView(search, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         secondRow.addView(settings, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, matchWrap())
@@ -228,7 +242,59 @@ class MainActivity : Activity() {
             rightMargin = 18.dp()
             bottomMargin = 22.dp()
         })
+        frame.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    swipeStartX = event.x
+                    swipeStartY = event.y
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = event.x - swipeStartX
+                    val dy = event.y - swipeStartY
+                    if (kotlin.math.abs(dx) > 90.dp() && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.4f) {
+                        visibleMonth = if (dx < 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                        showCalendar()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                else -> false
+            }
+        }
         setContentView(frame)
+    }
+
+    private fun showMonthPicker() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(16.dp(), 10.dp(), 16.dp(), 4.dp())
+        }
+        val yearPicker = NumberPicker(this).apply {
+            minValue = 1970
+            maxValue = 2100
+            value = visibleMonth.year
+            wrapSelectorWheel = false
+        }
+        val monthPicker = NumberPicker(this).apply {
+            minValue = 1
+            maxValue = 12
+            value = visibleMonth.monthValue
+        }
+        root.addView(yearPicker, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(monthPicker, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        AlertDialog.Builder(this)
+            .setTitle("년월 선택")
+            .setView(root)
+            .setNegativeButton("취소", null)
+            .setPositiveButton("이동") { _, _ ->
+                visibleMonth = YearMonth.of(yearPicker.value, monthPicker.value)
+                selectedDate = visibleMonth.atDay(1)
+                showCalendar()
+            }
+            .show()
     }
 
     private fun reloadCalendar() {
