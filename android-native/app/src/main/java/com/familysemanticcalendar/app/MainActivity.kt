@@ -21,6 +21,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -157,6 +158,8 @@ class MainActivity : Activity() {
     }
 
     private fun showCalendar(loading: Boolean = false) {
+        val frame = FrameLayout(this)
+        frame.setBackgroundColor(screenBg)
         val root = LinearLayout(this).vertical().withPadding(12.dp())
         root.setBackgroundColor(screenBg)
         val top = LinearLayout(this).apply {
@@ -169,9 +172,16 @@ class MainActivity : Activity() {
         }
         val prev = Button(this).apply { text = "<" }.navButton()
         val next = Button(this).apply { text = ">" }.navButton()
-        val add = Button(this).apply { text = "+ 일정" }.primaryButton()
         val search = Button(this).apply { text = "검색" }.secondaryButton()
         val settings = Button(this).apply { text = "설정" }.secondaryButton()
+        val addFab = TextView(this).text("+").center().apply {
+            textSize = 30f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(teal, 999.dp())
+            elevation = 8.dp().toFloat()
+            setOnClickListener { showEventDialog() }
+        }
         val monthTitle = TextView(this).text(visibleMonth.format(monthFormatter)).size(22).bold().center().apply { setTextColor(slate900) }
         val calendarTitle = TextView(this).text(activeCalendarLabel()).size(14).muted().apply {
             background = rounded(0xFFEFF6FF.toInt(), 999.dp())
@@ -195,14 +205,12 @@ class MainActivity : Activity() {
             visibleMonth = visibleMonth.plusMonths(1)
             showCalendar()
         }
-        add.setOnClickListener { showEventDialog() }
         search.setOnClickListener { showSearchDialog() }
         settings.setOnClickListener { showCalendarDialog() }
 
         top.addView(prev, LinearLayout.LayoutParams(48.dp(), 42.dp()))
         top.addView(monthTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         top.addView(next, LinearLayout.LayoutParams(48.dp(), 42.dp()))
-        secondRow.addView(add, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         secondRow.addView(search, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         secondRow.addView(settings, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, matchWrap())
@@ -215,7 +223,12 @@ class MainActivity : Activity() {
 
         drawCalendar(calendarGrid)
         drawEventList(eventList, listTitle)
-        setContentView(ScrollView(this).apply { addView(root) })
+        frame.addView(ScrollView(this).apply { addView(root) }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = 18.dp()
+            bottomMargin = 22.dp()
+        })
+        setContentView(frame)
     }
 
     private fun reloadCalendar() {
@@ -239,7 +252,7 @@ class MainActivity : Activity() {
     private fun drawCalendar(grid: GridLayout) {
         grid.removeAllViews()
         listOf("일", "월", "화", "수", "목", "금", "토").forEachIndexed { index, label ->
-            grid.addView(dayText(label, header = true, sunday = index == 0, saturday = index == 6), cellParams(48))
+            grid.addView(dayText(label, header = true, sunday = index == 0, saturday = index == 6), cellParams(32))
         }
         val first = visibleMonth.atDay(1)
         val start = first.minusDays(first.dayOfWeek.value % 7L)
@@ -266,7 +279,7 @@ class MainActivity : Activity() {
                 visibleMonth = YearMonth.from(date)
                 showCalendar()
             }
-            grid.addView(cell, cellParams(92))
+            grid.addView(cell, cellParams(78))
         }
     }
 
@@ -282,12 +295,16 @@ class MainActivity : Activity() {
             val endText = event.endsAt?.takeIf { it.toLocalDate() != event.startsAt.toLocalDate() }?.let { " ~ ${it.toLocalDate().format(dateFormatter)}" } ?: ""
             val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
             val owner = ownerName(members, event.createdBy)
-            container.addView(Button(this).apply {
-                text = "$time  [$owner] ${event.title}$endText"
-                gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                eventButton()
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+                setPadding(12.dp(), 9.dp(), 12.dp(), 9.dp())
                 setOnClickListener { showEventDialog(event) }
-            }, matchWrap(top = 4))
+            }
+            row.addView(TextView(this).text(event.title).size(15).bold().apply { setTextColor(slate900) }, matchWrap())
+            row.addView(TextView(this).text("$time  [$owner]$endText").size(12).apply { setTextColor(slate600) }, matchWrap(top = 2))
+            if (event.location.isNotBlank()) row.addView(TextView(this).text(event.location).size(12).muted(), matchWrap(top = 2))
+            container.addView(row, matchWrap(top = 6))
         }
     }
 
