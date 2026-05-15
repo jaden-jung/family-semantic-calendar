@@ -54,6 +54,7 @@ class MainActivity : Activity() {
     private var events: List<EventItem> = emptyList()
     private var swipeStartX = 0f
     private var swipeStartY = 0f
+    private var listExpanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -239,32 +240,43 @@ class MainActivity : Activity() {
 
         drawCalendar(calendarGrid)
         drawEventList(eventList, listTitle)
-        frame.addView(ScrollView(this).apply { addView(root) }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
-            rightMargin = 18.dp()
-            bottomMargin = 22.dp()
-        })
-        frame.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
+        val swipeListener = View.OnTouchListener { _, touch ->
+            when (touch.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    swipeStartX = event.x
-                    swipeStartY = event.y
-                    true
+                    swipeStartX = touch.x
+                    swipeStartY = touch.y
+                    false
                 }
                 MotionEvent.ACTION_UP -> {
-                    val dx = event.x - swipeStartX
-                    val dy = event.y - swipeStartY
-                    if (kotlin.math.abs(dx) > 90.dp() && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.4f) {
-                        visibleMonth = if (dx < 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
-                        showCalendar()
-                        true
-                    } else {
-                        false
+                    val dx = touch.x - swipeStartX
+                    val dy = touch.y - swipeStartY
+                    when {
+                        kotlin.math.abs(dx) > 90.dp() && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.4f -> {
+                            visibleMonth = if (dx < 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                            showCalendar()
+                            true
+                        }
+                        kotlin.math.abs(dy) > 90.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) * 1.4f -> {
+                            listExpanded = dy < 0
+                            showCalendar()
+                            true
+                        }
+                        else -> false
                     }
                 }
                 else -> false
             }
         }
+        val scroll = ScrollView(this).apply {
+            addView(root)
+            setOnTouchListener(swipeListener)
+        }
+        frame.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin = 18.dp()
+            bottomMargin = 22.dp()
+        })
+        frame.setOnTouchListener(swipeListener)
         setContentView(frame)
     }
 
@@ -358,7 +370,7 @@ class MainActivity : Activity() {
                 visibleMonth = YearMonth.from(date)
                 showCalendar()
             }
-            grid.addView(cell, cellParams(78))
+            grid.addView(cell, cellParams(if (listExpanded) 48 else 78))
         }
     }
 
@@ -374,7 +386,7 @@ class MainActivity : Activity() {
     ): LinearLayout {
         val cell = LinearLayout(this).vertical()
         cell.gravity = Gravity.CENTER_HORIZONTAL
-        cell.setPadding(4.dp(), 5.dp(), 4.dp(), 3.dp())
+        cell.setPadding(4.dp(), if (listExpanded) 3.dp() else 5.dp(), 4.dp(), 3.dp())
         cell.background = rounded(
             fillColor = when {
                 selected -> 0xFFD1FAE5.toInt()
@@ -399,7 +411,7 @@ class MainActivity : Activity() {
         }
         cell.addView(number, matchWrap())
 
-        if (holiday != null) {
+        if (holiday != null && !listExpanded) {
             cell.addView(TextView(this).text(holiday.take(4)).size(9).center().apply { setTextColor(0xFFDC2626.toInt()) }, matchWrap())
         }
 
@@ -418,11 +430,13 @@ class MainActivity : Activity() {
             }
             cell.addView(dots, matchWrap(top = 2))
 
-            val first = dayEvents.first()
-            cell.addView(TextView(this).text(first.title.take(7)).size(9).center().apply {
-                setTextColor(slate900)
-                maxLines = 1
-            }, matchWrap(top = 1))
+            if (!listExpanded) {
+                val first = dayEvents.first()
+                cell.addView(TextView(this).text(first.title.take(7)).size(9).center().apply {
+                    setTextColor(slate900)
+                    maxLines = 1
+                }, matchWrap(top = 1))
+            }
         }
         return cell
     }
@@ -621,7 +635,12 @@ class MainActivity : Activity() {
             setTextColor(slate600)
             textSize = 13f
         }, matchWrap())
-        root.addView(section("일정 정보") {
+        root.addView(section("날짜와 시간") {
+            addView(twoColumnRow(dateButton, timeButton), matchWrap(top = 10))
+            addView(periodCheck, matchWrap(top = 8))
+            addView(endDateButton, matchWrap(top = 4))
+        }, matchWrap(top = 12))
+        root.addView(section("일정 내용") {
             addView(formLabel("제목"), matchWrap(top = 10))
             addView(titleInput, matchWrap(top = 6))
             addView(formLabel("설명"), matchWrap(top = 10))
@@ -629,18 +648,15 @@ class MainActivity : Activity() {
             addView(formLabel("장소"), matchWrap(top = 10))
             addView(locationInput, matchWrap(top = 6))
         }, matchWrap(top = 12))
-        root.addView(section("날짜와 반복") {
-            addView(twoColumnRow(dateButton, timeButton), matchWrap(top = 10))
-            addView(periodCheck, matchWrap(top = 8))
-            addView(endDateButton, matchWrap(top = 4))
-            addView(repeatCheck, matchWrap(top = 4))
-            addView(repeatSpinner, matchWrap(top = 4))
-        }, matchWrap(top = 12))
         root.addView(section("공유") {
             addView(formLabel("등록할 달력"), matchWrap(top = 10))
             addView(calendarSpinner, matchWrap(top = 6))
             addView(formLabel("누구 일정"), matchWrap(top = 10))
             addView(ownerSpinner, matchWrap(top = 6))
+        }, matchWrap(top = 12))
+        root.addView(section("상세") {
+            addView(repeatCheck, matchWrap(top = 8))
+            addView(repeatSpinner, matchWrap(top = 4))
         }, matchWrap(top = 12))
 
         val builder = AlertDialog.Builder(this)
@@ -675,6 +691,7 @@ class MainActivity : Activity() {
                         dialog.dismiss()
                         selectedDate = date
                         visibleMonth = YearMonth.from(date)
+                        listExpanded = false
                         reloadCalendar()
                     },
                 )
@@ -759,6 +776,7 @@ class MainActivity : Activity() {
                 val event = results[index]
                 selectedDate = event.startsAt.toLocalDate()
                 visibleMonth = YearMonth.from(selectedDate)
+                listExpanded = false
                 showCalendar()
             }
             .setNegativeButton("닫기", null)
