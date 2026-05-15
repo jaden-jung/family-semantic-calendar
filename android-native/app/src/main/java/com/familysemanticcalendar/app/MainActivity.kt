@@ -59,6 +59,9 @@ class MainActivity : Activity() {
     private var monthTransitionDirection = 0
     private var gestureAxis = 0
     private var activeSwipeViews: List<View> = emptyList()
+    private var currentMonthView: View? = null
+    private var previousMonthView: View? = null
+    private var nextMonthView: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,10 +85,12 @@ class MainActivity : Activity() {
                         gestureAxis = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) 1 else 2
                     }
                     if (gestureAxis == 1) {
-                        activeSwipeViews.forEach { view ->
-                            view.translationX = dx * 0.72f
-                            view.alpha = (1f - (kotlin.math.abs(dx) / resources.displayMetrics.widthPixels).coerceAtMost(0.28f))
-                        }
+                        moveMonthViews(dx)
+                        activeSwipeViews.drop(1).forEach { view -> view.translationX = dx * 0.38f }
+                        return true
+                    }
+                    if (gestureAxis == 2) {
+                        moveVerticalViews(dy)
                         return true
                     }
                 }
@@ -100,6 +105,7 @@ class MainActivity : Activity() {
                         kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             val expand = dy < 0
                             if (listExpanded == expand) return true
+                            resetGestureTransforms()
                             listExpanded = dy < 0
                             monthTransitionDirection = 0
                             showCalendar()
@@ -107,14 +113,11 @@ class MainActivity : Activity() {
                             return true
                         }
                         gestureAxis == 1 -> {
-                            activeSwipeViews.forEach { view ->
-                                view.animate()
-                                    .translationX(0f)
-                                    .alpha(1f)
-                                    .setDuration(160L)
-                                    .setInterpolator(DecelerateInterpolator())
-                                    .start()
-                            }
+                            animateGestureReset()
+                            return true
+                        }
+                        gestureAxis == 2 -> {
+                            animateGestureReset()
                             return true
                         }
                     }
@@ -242,9 +245,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val search = Button(this).apply { text = "검색" }.secondaryButton()
-        val settings = Button(this).apply { text = "설정" }.secondaryButton()
-        val today = Button(this).apply { text = "오늘" }.secondaryButton()
+        val search = TextView(this).text("⌕").center().iconButton()
+        val settings = TextView(this).text("⚙").center().iconButton()
+        val today = TextView(this).text("오늘").center().todayChip()
         val addFab = TextView(this).text("+").center().apply {
             textSize = 30f
             setTextColor(Color.WHITE)
@@ -267,6 +270,22 @@ class MainActivity : Activity() {
             background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
             setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
         }
+        val previousGrid = GridLayout(this).apply {
+            columnCount = 7
+            rowCount = 7
+            background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
+            setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
+        }
+        val nextGrid = GridLayout(this).apply {
+            columnCount = 7
+            rowCount = 7
+            background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
+            setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
+        }
+        val calendarFrame = FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
         val listTitle = TextView(this).text("${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정").size(18).bold().apply { setTextColor(slate900) }
         val eventList = LinearLayout(this).vertical()
         val listPanel = LinearLayout(this).vertical().apply {
@@ -287,18 +306,24 @@ class MainActivity : Activity() {
             showCalendar()
         }
 
-        top.addView(settings, LinearLayout.LayoutParams(72.dp(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+        top.addView(today, LinearLayout.LayoutParams(46.dp(), 34.dp()).apply {
             rightMargin = 8.dp()
         })
         top.addView(monthTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(search, LinearLayout.LayoutParams(72.dp(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+        top.addView(search, LinearLayout.LayoutParams(40.dp(), 40.dp()).apply {
             leftMargin = 8.dp()
         })
-        secondRow.addView(today, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(settings, LinearLayout.LayoutParams(40.dp(), 40.dp()).apply {
+            leftMargin = 6.dp()
+        })
         root.addView(top, matchWrap())
         root.addView(calendarTitle, matchWrap(top = 4))
-        root.addView(secondRow, matchWrap(top = 8))
-        root.addView(calendarGrid, matchWrap(top = 10))
+        calendarFrame.addView(previousGrid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        calendarFrame.addView(nextGrid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        calendarFrame.addView(calendarGrid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        root.addView(calendarFrame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, calendarHeight()).apply {
+            topMargin = 10.dp()
+        })
         listHeader.addView(listTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         listPanel.addView(listHeader, matchWrap())
         listPanel.addView(ScrollView(this).apply {
@@ -313,9 +338,15 @@ class MainActivity : Activity() {
         })
         root.addView(progress, wrapCenter(top = 8))
 
-        drawCalendar(calendarGrid)
+        drawCalendar(previousGrid, visibleMonth.minusMonths(1))
+        drawCalendar(nextGrid, visibleMonth.plusMonths(1))
+        drawCalendar(calendarGrid, visibleMonth)
         drawEventList(eventList, listTitle)
         activeSwipeViews = listOf(calendarGrid, listPanel)
+        currentMonthView = calendarGrid
+        previousMonthView = previousGrid
+        nextMonthView = nextGrid
+        prepareAdjacentMonthViews()
         frame.addView(root, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
             rightMargin = 18.dp()
@@ -323,6 +354,10 @@ class MainActivity : Activity() {
         })
         setContentView(frame)
         playMonthTransition(calendarGrid, listPanel)
+    }
+
+    private fun calendarHeight(): Int {
+        return (32 + 6 * if (listExpanded) 36 else 62).dp() + 8.dp()
     }
 
     private fun playMonthTransition(vararg views: View) {
@@ -344,30 +379,98 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun prepareAdjacentMonthViews() {
+        val width = resources.displayMetrics.widthPixels.toFloat()
+        previousMonthView?.translationX = -width
+        nextMonthView?.translationX = width
+        previousMonthView?.alpha = 1f
+        nextMonthView?.alpha = 1f
+    }
+
+    private fun moveMonthViews(dx: Float) {
+        val width = resources.displayMetrics.widthPixels.toFloat()
+        currentMonthView?.translationX = dx
+        previousMonthView?.translationX = dx - width
+        nextMonthView?.translationX = dx + width
+    }
+
+    private fun moveVerticalViews(dy: Float) {
+        val progress = (kotlin.math.abs(dy) / 220.dp()).coerceAtMost(1f)
+        val calendarScale = if (dy < 0) 1f - progress * 0.08f else 0.92f + progress * 0.08f
+        currentMonthView?.pivotY = 0f
+        currentMonthView?.scaleY = calendarScale
+        activeSwipeViews.drop(1).forEach { view ->
+            view.translationY = dy * 0.28f
+            view.alpha = 1f - progress * 0.08f
+        }
+    }
+
+    private fun resetGestureTransforms() {
+        activeSwipeViews.forEach {
+            it.translationX = 0f
+            it.translationY = 0f
+            it.scaleY = 1f
+            it.alpha = 1f
+        }
+        prepareAdjacentMonthViews()
+    }
+
+    private fun animateGestureReset() {
+        activeSwipeViews.forEach { view ->
+            view.animate()
+                .translationX(0f)
+                .translationY(0f)
+                .scaleY(1f)
+                .alpha(1f)
+                .setDuration(160L)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        }
+        previousMonthView?.animate()
+            ?.translationX(-resources.displayMetrics.widthPixels.toFloat())
+            ?.setDuration(160L)
+            ?.setInterpolator(DecelerateInterpolator())
+            ?.start()
+        nextMonthView?.animate()
+            ?.translationX(resources.displayMetrics.widthPixels.toFloat())
+            ?.setDuration(160L)
+            ?.setInterpolator(DecelerateInterpolator())
+            ?.start()
+    }
+
     private fun animateMonthDragCommit(direction: Int) {
-        val views = activeSwipeViews
-        if (views.isEmpty()) {
+        val current = currentMonthView
+        val incoming = if (direction > 0) nextMonthView else previousMonthView
+        if (current == null || incoming == null) {
             monthTransitionDirection = direction
             visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
             showCalendar()
             return
         }
-        val distance = resources.displayMetrics.widthPixels.toFloat() * direction * -0.88f
-        var finished = false
-        views.forEach { view ->
+        val width = resources.displayMetrics.widthPixels.toFloat()
+        current.animate()
+            .translationX(if (direction > 0) -width else width)
+            .alpha(0.92f)
+            .setDuration(150L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+        incoming.animate()
+            .translationX(0f)
+            .alpha(1f)
+            .setDuration(150L)
+            .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                monthTransitionDirection = 0
+                visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                showCalendar()
+            }
+            .start()
+        activeSwipeViews.drop(1).forEach { view ->
             view.animate()
-                .translationX(distance)
+                .translationX(if (direction > 0) -width * 0.24f else width * 0.24f)
                 .alpha(0.45f)
-                .setDuration(120L)
+                .setDuration(150L)
                 .setInterpolator(DecelerateInterpolator())
-                .withEndAction {
-                    if (!finished) {
-                        finished = true
-                        monthTransitionDirection = direction
-                        visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
-                        showCalendar()
-                    }
-                }
                 .start()
         }
     }
@@ -379,6 +482,7 @@ class MainActivity : Activity() {
                 view.alpha = 0.78f
                 view.animate()
                     .translationY(0f)
+                    .scaleY(1f)
                     .alpha(1f)
                     .setDuration(210L)
                     .setInterpolator(DecelerateInterpolator())
@@ -451,12 +555,12 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun drawCalendar(grid: GridLayout) {
+    private fun drawCalendar(grid: GridLayout, month: YearMonth = visibleMonth) {
         grid.removeAllViews()
         listOf("일", "월", "화", "수", "목", "금", "토").forEachIndexed { index, label ->
             grid.addView(dayText(label, header = true, sunday = index == 0, saturday = index == 6), cellParams(32))
         }
-        val first = visibleMonth.atDay(1)
+        val first = month.atDay(1)
         val start = first.minusDays(first.dayOfWeek.value % 7L)
         repeat(42) { index ->
             val date = start.plusDays(index.toLong())
@@ -466,7 +570,7 @@ class MainActivity : Activity() {
                 date = date,
                 holiday = holiday,
                 dayEvents = dayEvents,
-                inMonth = date.month == visibleMonth.month,
+                inMonth = date.month == month.month,
                 today = date == LocalDate.now(),
                 selected = date == selectedDate,
                 sunday = date.dayOfWeek.value == 7 || holiday != null,
@@ -1160,6 +1264,18 @@ private fun TextView.size(value: Int): TextView = apply { textSize = value.toFlo
 private fun TextView.bold(): TextView = apply { setTypeface(typeface, Typeface.BOLD) }
 private fun TextView.center(): TextView = apply { gravity = Gravity.CENTER }
 private fun TextView.muted(): TextView = apply { setTextColor(0xFF64748B.toInt()) }
+private fun TextView.iconButton(): TextView = apply {
+    setTextColor(slate900)
+    textSize = 22f
+    setTypeface(typeface, Typeface.BOLD)
+    background = rounded(Color.WHITE, 999.dp(), borderColor)
+}
+private fun TextView.todayChip(): TextView = apply {
+    setTextColor(teal)
+    textSize = 12f
+    setTypeface(typeface, Typeface.BOLD)
+    background = rounded(tealSoft, 999.dp(), 0xFF99F6E4.toInt())
+}
 private fun rounded(fillColor: Int, radius: Int, strokeColor: Int? = null, strokeWidth: Int = 1): GradientDrawable {
     return GradientDrawable().apply {
         shape = GradientDrawable.RECTANGLE
