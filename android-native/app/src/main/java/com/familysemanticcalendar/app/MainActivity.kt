@@ -19,6 +19,7 @@ import android.os.CancellationSignal
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -468,32 +469,93 @@ class MainActivity : Activity() {
         var time = event?.startsAt?.toLocalTime() ?: LocalTime.of(9, 0)
         var endDate = event?.endsAt?.toLocalDate() ?: date
 
-        val root = LinearLayout(this).vertical().withPadding(18)
+        val root = LinearLayout(this).vertical().apply {
+            setPadding(18.dp(), 6.dp(), 18.dp(), 10.dp())
+            setBackgroundColor(screenBg)
+        }
+        fun formLabel(value: String) = TextView(this).text(value).bold().apply {
+            setTextColor(slate600)
+            textSize = 12f
+        }
+        fun styleInput(input: EditText): EditText = input.apply {
+            setTextColor(slate900)
+            setHintTextColor(0xFF94A3B8.toInt())
+            textSize = 15f
+            background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+            setPadding(12.dp(), 4.dp(), 12.dp(), 4.dp())
+            minHeight = 46.dp()
+        }
+        fun styleSpinner(spinner: Spinner): Spinner = spinner.apply {
+            background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+            setPadding(8.dp(), 0, 8.dp(), 0)
+            minimumHeight = 46.dp()
+        }
+        fun stylePicker(button: Button): Button = button.apply {
+            isAllCaps = false
+            setTextColor(slate900)
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+            minHeight = 46.dp()
+        }
+        fun section(title: String, body: LinearLayout.() -> Unit): LinearLayout {
+            return LinearLayout(this).vertical().apply {
+                background = rounded(Color.WHITE, 14.dp(), 0xFFE2E8F0.toInt())
+                setPadding(14.dp(), 12.dp(), 14.dp(), 14.dp())
+                addView(TextView(this@MainActivity).text(title).bold().apply {
+                    setTextColor(slate900)
+                    textSize = 15f
+                }, matchWrap())
+                body()
+            }
+        }
+        fun twoColumnRow(left: View, right: View): LinearLayout {
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    rightMargin = 5.dp()
+                })
+                addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    leftMargin = 5.dp()
+                })
+            }
+        }
         val calendarSpinner = Spinner(this)
         val calendarNames = calendars.map { it.name }
-        calendarSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, calendarNames)
+        calendarSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, calendarNames).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        styleSpinner(calendarSpinner)
         val calendarIndex = calendars.indexOfFirst { it.id == (event?.calendarId ?: selectedCalendarId) }.coerceAtLeast(0)
         calendarSpinner.setSelection(calendarIndex)
         val ownerSpinner = Spinner(this)
         val owners = listOf(User(ALL_OWNER_ID, "모두")) + members
-        ownerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, owners.map { it.displayName })
+        ownerSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, owners.map { it.displayName }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        styleSpinner(ownerSpinner)
         val defaultOwnerId = event?.createdBy ?: currentUser.id
         val ownerIndex = owners.indexOfFirst { it.id == defaultOwnerId }.let { if (it >= 0) it else 0 }
         ownerSpinner.setSelection(ownerIndex)
 
-        val dateButton = Button(this).apply { text = "날짜 ${date.format(dateFormatter)}" }
-        val timeButton = Button(this).apply { text = "시간 %02d:%02d".format(time.hour, time.minute) }
+        val dateButton = stylePicker(Button(this).apply { text = "날짜 ${date.format(dateFormatter)}" })
+        val timeButton = stylePicker(Button(this).apply { text = "시간 %02d:%02d".format(time.hour, time.minute) })
         val periodCheck = CheckBox(this).apply {
             text = "기간 일정"
             isChecked = event?.endsAt?.toLocalDate()?.isAfter(date) == true
+            setTextColor(slate900)
         }
         val repeatCheck = CheckBox(this).apply {
             text = "반복"
             isChecked = event?.recurrenceRule != null
+            setTextColor(slate900)
         }
         val repeatSpinner = Spinner(this)
         val repeatLabels = listOf("매일", "매주", "매월", "매년")
-        repeatSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, repeatLabels)
+        repeatSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, repeatLabels).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        styleSpinner(repeatSpinner)
         repeatSpinner.visibility = if (repeatCheck.isChecked) View.VISIBLE else View.GONE
         val repeatIndex = when (event?.recurrenceRule?.optString("frequency")) {
             "daily" -> 0
@@ -503,25 +565,26 @@ class MainActivity : Activity() {
             else -> 1
         }
         repeatSpinner.setSelection(repeatIndex)
-        val endDateButton = Button(this).apply {
+        val endDateButton = stylePicker(Button(this).apply {
             text = "종료일 ${endDate.format(dateFormatter)}"
             visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
-        }
-        val titleInput = EditText(this).apply {
+        })
+        val titleInput = styleInput(EditText(this).apply {
             hint = "제목"
             setSingleLine(true)
             setText(event?.title.orEmpty())
-        }
-        val bodyInput = EditText(this).apply {
+        })
+        val bodyInput = styleInput(EditText(this).apply {
             hint = "설명"
             minLines = 3
+            gravity = Gravity.TOP or Gravity.START
             setText(event?.body.orEmpty())
-        }
-        val locationInput = EditText(this).apply {
+        })
+        val locationInput = styleInput(EditText(this).apply {
             hint = "장소"
             setSingleLine(true)
             setText(event?.location.orEmpty())
-        }
+        })
 
         fun refreshButtons() {
             dateButton.text = "날짜 ${date.format(dateFormatter)}"
@@ -554,19 +617,31 @@ class MainActivity : Activity() {
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         repeatCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
 
-        root.addView(TextView(this).text("달력").bold(), matchWrap())
-        root.addView(calendarSpinner, matchWrap())
-        root.addView(TextView(this).text("누구 일정").bold(), matchWrap(top = 8))
-        root.addView(ownerSpinner, matchWrap())
-        root.addView(dateButton, matchWrap(top = 8))
-        root.addView(timeButton, matchWrap())
-        root.addView(periodCheck, matchWrap())
-        root.addView(endDateButton, matchWrap())
-        root.addView(repeatCheck, matchWrap())
-        root.addView(repeatSpinner, matchWrap())
-        root.addView(titleInput, matchWrap(top = 8))
-        root.addView(bodyInput, matchWrap())
-        root.addView(locationInput, matchWrap())
+        root.addView(TextView(this).text(if (event == null) "새 일정을 등록합니다" else "일정 내용을 수정합니다").apply {
+            setTextColor(slate600)
+            textSize = 13f
+        }, matchWrap())
+        root.addView(section("일정 정보") {
+            addView(formLabel("제목"), matchWrap(top = 10))
+            addView(titleInput, matchWrap(top = 6))
+            addView(formLabel("설명"), matchWrap(top = 10))
+            addView(bodyInput, matchWrap(top = 6))
+            addView(formLabel("장소"), matchWrap(top = 10))
+            addView(locationInput, matchWrap(top = 6))
+        }, matchWrap(top = 12))
+        root.addView(section("날짜와 반복") {
+            addView(twoColumnRow(dateButton, timeButton), matchWrap(top = 10))
+            addView(periodCheck, matchWrap(top = 8))
+            addView(endDateButton, matchWrap(top = 4))
+            addView(repeatCheck, matchWrap(top = 4))
+            addView(repeatSpinner, matchWrap(top = 4))
+        }, matchWrap(top = 12))
+        root.addView(section("공유") {
+            addView(formLabel("등록할 달력"), matchWrap(top = 10))
+            addView(calendarSpinner, matchWrap(top = 6))
+            addView(formLabel("누구 일정"), matchWrap(top = 10))
+            addView(ownerSpinner, matchWrap(top = 6))
+        }, matchWrap(top = 12))
 
         val builder = AlertDialog.Builder(this)
             .setTitle(if (event == null) "일정 추가" else "일정 수정")
@@ -624,6 +699,13 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+            setTextColor(teal)
+            setTypeface(typeface, Typeface.BOLD)
+        }
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(slate600)
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(0xFFDC2626.toInt())
     }
 
     private fun buildRecurrenceRule(index: Int, date: LocalDate): JSONObject {
