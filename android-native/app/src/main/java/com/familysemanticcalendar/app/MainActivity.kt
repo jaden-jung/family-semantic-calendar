@@ -104,7 +104,10 @@ class MainActivity : Activity() {
                         }
                         kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             val expand = dy < 0
-                            if (listExpanded == expand) return true
+                            if (listExpanded == expand) {
+                                animateGestureReset()
+                                return true
+                            }
                             resetGestureTransforms()
                             listExpanded = dy < 0
                             monthTransitionDirection = 0
@@ -406,7 +409,7 @@ class MainActivity : Activity() {
     }
 
     private fun resetGestureTransforms() {
-        activeSwipeViews.forEach {
+        (activeSwipeViews + listOfNotNull(currentMonthView, previousMonthView, nextMonthView)).distinct().forEach {
             it.translationX = 0f
             it.translationY = 0f
             it.scaleY = 1f
@@ -416,7 +419,7 @@ class MainActivity : Activity() {
     }
 
     private fun animateGestureReset() {
-        activeSwipeViews.forEach { view ->
+        (activeSwipeViews + listOfNotNull(currentMonthView)).distinct().forEach { view ->
             view.animate()
                 .translationX(0f)
                 .translationY(0f)
@@ -664,10 +667,16 @@ class MainActivity : Activity() {
             val endText = event.endsAt?.takeIf { it.toLocalDate() != event.startsAt.toLocalDate() }?.let { " ~ ${it.toLocalDate().format(dateFormatter)}" } ?: ""
             val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
             val owner = ownerName(members, event.createdBy)
+            val meta = listOfNotNull(
+                time,
+                event.location.takeIf { it.isNotBlank() },
+                owner.takeIf { it.isNotBlank() }?.let { "[$it]" },
+                endText.takeIf { it.isNotBlank() },
+            ).joinToString("  ")
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
-                setPadding(12.dp(), 9.dp(), 12.dp(), 9.dp())
+                setPadding(12.dp(), 10.dp(), 12.dp(), 10.dp())
                 setOnClickListener { showEventDialog(event) }
             }
             row.addView(View(this).apply {
@@ -676,9 +685,20 @@ class MainActivity : Activity() {
                 rightMargin = 10.dp()
             })
             val texts = LinearLayout(this).vertical()
-            texts.addView(TextView(this).text(event.title).size(15).bold().apply { setTextColor(slate900) }, matchWrap())
-            texts.addView(TextView(this).text("$time  [$owner]$endText").size(12).apply { setTextColor(slate600) }, matchWrap(top = 2))
-            if (event.location.isNotBlank()) texts.addView(TextView(this).text(event.location).size(12).muted(), matchWrap(top = 2))
+            texts.addView(TextView(this).text(event.title).size(15).bold().apply {
+                setTextColor(slate900)
+                maxLines = 1
+            }, matchWrap())
+            texts.addView(TextView(this).text(meta).size(11).apply {
+                setTextColor(slate600)
+                maxLines = 1
+            }, matchWrap(top = 2))
+            if (event.body.isNotBlank()) {
+                texts.addView(TextView(this).text(event.body).size(13).apply {
+                    setTextColor(0xFF334155.toInt())
+                    maxLines = 2
+                }, matchWrap(top = 5))
+            }
             row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             container.addView(row, matchWrap(top = 6))
         }
