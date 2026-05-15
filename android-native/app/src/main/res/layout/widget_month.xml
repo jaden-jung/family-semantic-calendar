@@ -4,7 +4,7 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_background"
     android:orientation="vertical"
-    android:padding="14dp">
+    android:padding="10dp">
 
     <TextView
         android:id="@+id/monthWidgetTitle"
@@ -16,14 +16,75 @@
         android:textSize="14sp"
         android:textStyle="bold" />
 
-    <TextView
-        android:id="@+id/monthWidgetBody"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:fontFamily="monospace"
-        android:includeFontPadding="false"
-        android:lineSpacingExtra="2dp"
-        android:textColor="#0F172A"
-        android:textSize="12sp" />
+        android:layout_height="18dp"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <TextView style="@style/MonthWidgetWeekday" android:text="일" android:textColor="#DC2626" />
+        <TextView style="@style/MonthWidgetWeekday" android:text="월" />
+        <TextView style="@style/MonthWidgetWeekday" android:text="화" />
+        <TextView style="@style/MonthWidgetWeekday" android:text="수" />
+        <TextView style="@style/MonthWidgetWeekday" android:text="목" />
+        <TextView style="@style/MonthWidgetWeekday" android:text="금" />
+        <TextView style="@style/MonthWidgetWeekday" android:text="토" android:textColor="#2563EB" />
+    </LinearLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical">
+        <LinearLayout style="@style/MonthWidgetWeekRow">
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d0" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d1" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d2" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d3" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d4" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d5" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d6" />
+        </LinearLayout>
+        <LinearLayout style="@style/MonthWidgetWeekRow">
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d7" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d8" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d9" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d10" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d11" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d12" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d13" />
+        </LinearLayout>
+        <LinearLayout style="@style/MonthWidgetWeekRow">
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d14" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d15" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d16" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d17" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d18" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d19" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d20" />
+        </LinearLayout>
+        <LinearLayout style="@style/MonthWidgetWeekRow">
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d21" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d22" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d23" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d24" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d25" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d26" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d27" />
+        </LinearLayout>
+        <LinearLayout style="@style/MonthWidgetWeekRow">
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d28" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d29" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d30" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d31" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d32" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d33" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d34" />
+        </LinearLayout>
+        <LinearLayout style="@style/MonthWidgetWeekRow">
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d35" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d36" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d37" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d38" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d39" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d40" />
+            <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d41" />
+        </LinearLayout>
+    </LinearLayout>
 </LinearLayout>
