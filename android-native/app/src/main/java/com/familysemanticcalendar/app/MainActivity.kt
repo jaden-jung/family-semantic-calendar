@@ -90,7 +90,11 @@ class MainActivity : Activity() {
                         return true
                     }
                     if (gestureAxis == 2) {
-                        moveVerticalViews(dy)
+                        if (canMoveVertical(dy)) {
+                            moveVerticalViews(dy)
+                        } else {
+                            resetGestureTransforms()
+                        }
                         return true
                     }
                 }
@@ -360,8 +364,14 @@ class MainActivity : Activity() {
     }
 
     private fun calendarHeight(): Int {
-        return (32 + 6 * if (listExpanded) 36 else 62).dp() + 8.dp()
+        val header = 32
+        val cell = calendarCellHeight()
+        val rowMargins = 7 * 4
+        val gridPadding = 8
+        return (header + 6 * cell + rowMargins + gridPadding).dp()
     }
+
+    private fun calendarCellHeight(): Int = if (listExpanded) 36 else 66
 
     private fun playMonthTransition(vararg views: View) {
         val direction = monthTransitionDirection
@@ -406,6 +416,10 @@ class MainActivity : Activity() {
             view.translationY = dy * 0.28f
             view.alpha = 1f - progress * 0.08f
         }
+    }
+
+    private fun canMoveVertical(dy: Float): Boolean {
+        return (dy < 0 && !listExpanded) || (dy > 0 && listExpanded)
     }
 
     private fun resetGestureTransforms() {
@@ -584,7 +598,7 @@ class MainActivity : Activity() {
                 visibleMonth = YearMonth.from(date)
                 showCalendar()
             }
-            grid.addView(cell, cellParams(if (listExpanded) 36 else 62))
+            grid.addView(cell, cellParams(calendarCellHeight()))
         }
     }
 
