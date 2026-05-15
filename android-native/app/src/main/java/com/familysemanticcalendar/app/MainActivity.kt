@@ -57,6 +57,8 @@ class MainActivity : Activity() {
     private var swipeStartY = 0f
     private var listExpanded = false
     private var monthTransitionDirection = 0
+    private var gestureAxis = 0
+    private var activeSwipeViews: List<View> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,23 +72,53 @@ class MainActivity : Activity() {
                 MotionEvent.ACTION_DOWN -> {
                     swipeStartX = event.x
                     swipeStartY = event.y
+                    gestureAxis = 0
+                    activeSwipeViews.forEach { it.animate().cancel() }
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.x - swipeStartX
+                    val dy = event.y - swipeStartY
+                    if (gestureAxis == 0 && (kotlin.math.abs(dx) > 14.dp() || kotlin.math.abs(dy) > 14.dp())) {
+                        gestureAxis = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) 1 else 2
+                    }
+                    if (gestureAxis == 1) {
+                        activeSwipeViews.forEach { view ->
+                            view.translationX = dx * 0.72f
+                            view.alpha = (1f - (kotlin.math.abs(dx) / resources.displayMetrics.widthPixels).coerceAtMost(0.28f))
+                        }
+                        return true
+                    }
                 }
                 MotionEvent.ACTION_UP -> {
                     val dx = event.x - swipeStartX
                     val dy = event.y - swipeStartY
                     when {
                         kotlin.math.abs(dx) > 70.dp() && kotlin.math.abs(dx) >= kotlin.math.abs(dy) -> {
-                            monthTransitionDirection = if (dx < 0) 1 else -1
-                            visibleMonth = if (monthTransitionDirection > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
-                            showCalendar()
+                            animateMonthDragCommit(if (dx < 0) 1 else -1)
                             return true
                         }
                         kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
+                            val expand = dy < 0
+                            if (listExpanded == expand) return true
                             listExpanded = dy < 0
+                            monthTransitionDirection = 0
                             showCalendar()
+                            playListResizeTransition()
+                            return true
+                        }
+                        gestureAxis == 1 -> {
+                            activeSwipeViews.forEach { view ->
+                                view.animate()
+                                    .translationX(0f)
+                                    .alpha(1f)
+                                    .setDuration(160L)
+                                    .setInterpolator(DecelerateInterpolator())
+                                    .start()
+                            }
                             return true
                         }
                     }
+                    gestureAxis = 0
                 }
             }
         }
@@ -210,8 +242,6 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val prev = Button(this).apply { text = "<" }.navButton()
-        val next = Button(this).apply { text = ">" }.navButton()
         val search = Button(this).apply { text = "검색" }.secondaryButton()
         val settings = Button(this).apply { text = "설정" }.secondaryButton()
         val today = Button(this).apply { text = "오늘" }.secondaryButton()
@@ -249,16 +279,6 @@ class MainActivity : Activity() {
         }
         val progress = ProgressBar(this).apply { visibility = if (loading) View.VISIBLE else View.GONE }
 
-        prev.setOnClickListener {
-            monthTransitionDirection = -1
-            visibleMonth = visibleMonth.minusMonths(1)
-            showCalendar()
-        }
-        next.setOnClickListener {
-            monthTransitionDirection = 1
-            visibleMonth = visibleMonth.plusMonths(1)
-            showCalendar()
-        }
         search.setOnClickListener { showSearchDialog() }
         settings.setOnClickListener { showCalendarDialog() }
         today.setOnClickListener {
@@ -267,12 +287,14 @@ class MainActivity : Activity() {
             showCalendar()
         }
 
-        top.addView(prev, LinearLayout.LayoutParams(48.dp(), 42.dp()))
+        top.addView(settings, LinearLayout.LayoutParams(72.dp(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            rightMargin = 8.dp()
+        })
         top.addView(monthTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(next, LinearLayout.LayoutParams(48.dp(), 42.dp()))
+        top.addView(search, LinearLayout.LayoutParams(72.dp(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            leftMargin = 8.dp()
+        })
         secondRow.addView(today, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        secondRow.addView(search, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        secondRow.addView(settings, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         root.addView(top, matchWrap())
         root.addView(calendarTitle, matchWrap(top = 4))
         root.addView(secondRow, matchWrap(top = 8))
@@ -293,6 +315,7 @@ class MainActivity : Activity() {
 
         drawCalendar(calendarGrid)
         drawEventList(eventList, listTitle)
+        activeSwipeViews = listOf(calendarGrid, listPanel)
         frame.addView(root, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
             rightMargin = 18.dp()
@@ -315,6 +338,49 @@ class MainActivity : Activity() {
                     .translationX(0f)
                     .alpha(1f)
                     .setDuration(230L)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
+            }
+        }
+    }
+
+    private fun animateMonthDragCommit(direction: Int) {
+        val views = activeSwipeViews
+        if (views.isEmpty()) {
+            monthTransitionDirection = direction
+            visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+            showCalendar()
+            return
+        }
+        val distance = resources.displayMetrics.widthPixels.toFloat() * direction * -0.88f
+        var finished = false
+        views.forEach { view ->
+            view.animate()
+                .translationX(distance)
+                .alpha(0.45f)
+                .setDuration(120L)
+                .setInterpolator(DecelerateInterpolator())
+                .withEndAction {
+                    if (!finished) {
+                        finished = true
+                        monthTransitionDirection = direction
+                        visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                        showCalendar()
+                    }
+                }
+                .start()
+        }
+    }
+
+    private fun playListResizeTransition() {
+        activeSwipeViews.forEach { view ->
+            view.post {
+                view.translationY = if (listExpanded) 24.dp().toFloat() else (-18).dp().toFloat()
+                view.alpha = 0.78f
+                view.animate()
+                    .translationY(0f)
+                    .alpha(1f)
+                    .setDuration(210L)
                     .setInterpolator(DecelerateInterpolator())
                     .start()
             }
