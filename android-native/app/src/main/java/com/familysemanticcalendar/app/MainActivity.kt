@@ -86,7 +86,7 @@ class MainActivity : Activity() {
                         if (gestureAxis == 2 && !canMoveVertical(dy)) {
                             gestureAxis = -1
                             resetGestureTransforms()
-                            return false
+                            return true
                         }
                     }
                     if (gestureAxis == 1) {
@@ -98,7 +98,7 @@ class MainActivity : Activity() {
                         moveVerticalViews(dy)
                         return true
                     }
-                    if (gestureAxis == -1) return false
+                    if (gestureAxis == -1) return true
                 }
                 MotionEvent.ACTION_UP -> {
                     val dx = event.x - swipeStartX
@@ -131,7 +131,7 @@ class MainActivity : Activity() {
                         }
                         gestureAxis == -1 -> {
                             gestureAxis = 0
-                            return false
+                            return true
                         }
                     }
                     gestureAxis = 0
@@ -372,7 +372,7 @@ class MainActivity : Activity() {
     private fun calendarHeight(): Int {
         val header = 32
         val cell = calendarCellHeight()
-        val rowMargins = 7 * 4
+        val rowMargins = 0
         val gridPadding = 8
         return (header + 6 * cell + rowMargins + gridPadding).dp()
     }
@@ -665,13 +665,14 @@ class MainActivity : Activity() {
                 }
                 cell.addView(dots, matchWrap(top = 2))
             } else {
-                val first = dayEvents.first()
-                cell.addView(TextView(this).text(first.title.take(7)).size(9).center().apply {
-                    setTextColor(slate900)
-                    maxLines = 1
-                    background = rounded(softCalendarColor(calendarColor(first.calendarId)), 5.dp())
-                    setPadding(3.dp(), 1.dp(), 3.dp(), 1.dp())
-                }, matchWrap(top = 1))
+                dayEvents.take(3).forEach { event ->
+                    cell.addView(TextView(this).text(event.title.take(8)).size(8).center().apply {
+                        setTextColor(slate900)
+                        maxLines = 1
+                        background = rounded(softCalendarColor(calendarColor(event.calendarId)), 4.dp())
+                        setPadding(2.dp(), 0, 2.dp(), 0)
+                    }, matchWrap(top = 1))
+                }
             }
         }
         return cell
@@ -824,6 +825,43 @@ class MainActivity : Activity() {
         }
         styleSpinner(repeatSpinner)
         repeatSpinner.visibility = if (repeatCheck.isChecked) View.VISIBLE else View.GONE
+        val intervalSpinner = Spinner(this)
+        val intervalLabels = (1..30).map { "$it" }
+        intervalSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, intervalLabels).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        styleSpinner(intervalSpinner)
+        intervalSpinner.visibility = if (repeatCheck.isChecked) View.VISIBLE else View.GONE
+        intervalSpinner.setSelection((event?.recurrenceRule?.optInt("interval", 1) ?: 1).coerceIn(1, 30) - 1)
+        val weekdayRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            visibility = View.GONE
+        }
+        val weekdayChecks = listOf("일", "월", "화", "수", "목", "금", "토").mapIndexed { index, label ->
+            CheckBox(this).apply {
+                text = label
+                textSize = 12f
+                setTextColor(slate900)
+                isChecked = event?.recurrenceRule?.optJSONArray("weekdays")?.let { days ->
+                    (0 until days.length()).any { days.optInt(it) == index }
+                } ?: (index == (if (date.dayOfWeek.value == 7) 0 else date.dayOfWeek.value))
+                weekdayRow.addView(this, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }
+        }
+        val monthlyModeSpinner = Spinner(this)
+        val monthlyModeLabels = listOf("같은 일자", "몇번째 주 요일")
+        monthlyModeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, monthlyModeLabels).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        styleSpinner(monthlyModeSpinner)
+        monthlyModeSpinner.visibility = View.GONE
+        monthlyModeSpinner.setSelection(if (event?.recurrenceRule?.optString("mode") == "nthWeekday") 1 else 0)
+        val lunarCheck = CheckBox(this).apply {
+            text = "음력 날짜로 매년 반복"
+            setTextColor(slate900)
+            isChecked = event?.recurrenceRule?.optBoolean("lunar", false) == true
+            visibility = View.GONE
+        }
         val repeatIndex = when (event?.recurrenceRule?.optString("frequency")) {
             "daily" -> 0
             "weekly" -> 1
@@ -858,7 +896,12 @@ class MainActivity : Activity() {
             timeButton.text = "시간 %02d:%02d".format(time.hour, time.minute)
             endDateButton.text = "종료일 ${endDate.format(dateFormatter)}"
             endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
-            repeatSpinner.visibility = if (repeatCheck.isChecked) View.VISIBLE else View.GONE
+            val repeatVisible = repeatCheck.isChecked
+            repeatSpinner.visibility = if (repeatVisible) View.VISIBLE else View.GONE
+            intervalSpinner.visibility = if (repeatVisible) View.VISIBLE else View.GONE
+            weekdayRow.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 1) View.VISIBLE else View.GONE
+            monthlyModeSpinner.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 2) View.VISIBLE else View.GONE
+            lunarCheck.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 3) View.VISIBLE else View.GONE
         }
 
         dateButton.setOnClickListener {
@@ -883,6 +926,10 @@ class MainActivity : Activity() {
         }
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         repeatCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
+        repeatSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) = refreshButtons()
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
 
         root.addView(TextView(this).text(if (event == null) "새 일정을 등록합니다" else "일정 내용을 수정합니다").apply {
             setTextColor(slate600)
@@ -910,6 +957,14 @@ class MainActivity : Activity() {
         root.addView(section("상세") {
             addView(repeatCheck, matchWrap(top = 8))
             addView(repeatSpinner, matchWrap(top = 4))
+            addView(TextView(this@MainActivity).text("반복 간격").apply {
+                setTextColor(slate600)
+                textSize = 12f
+            }, matchWrap(top = 8))
+            addView(intervalSpinner, matchWrap(top = 4))
+            addView(weekdayRow, matchWrap(top = 4))
+            addView(monthlyModeSpinner, matchWrap(top = 4))
+            addView(lunarCheck, matchWrap(top = 4))
         }, matchWrap(top = 12))
 
         val builder = AlertDialog.Builder(this)
@@ -931,7 +986,16 @@ class MainActivity : Activity() {
                 val owner = owners[ownerSpinner.selectedItemPosition].id.let { if (it == ALL_OWNER_ID) null else it }
                 val startsAt = LocalDateTime.of(date, time)
                 val endsAt = if (periodCheck.isChecked) LocalDateTime.of(endDate, LocalTime.of(23, 59)) else null
-                val recurrenceRule = if (repeatCheck.isChecked) buildRecurrenceRule(repeatSpinner.selectedItemPosition, date) else null
+                val recurrenceRule = if (repeatCheck.isChecked) {
+                    buildRecurrenceRule(
+                        repeatSpinner.selectedItemPosition,
+                        date,
+                        intervalSpinner.selectedItemPosition + 1,
+                        weekdayChecks.mapIndexedNotNull { index, check -> if (check.isChecked) index else null },
+                        monthlyModeSpinner.selectedItemPosition,
+                        lunarCheck.isChecked,
+                    )
+                } else null
                 background(
                     work = {
                         if (event == null) {
@@ -978,13 +1042,34 @@ class MainActivity : Activity() {
         dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(0xFFDC2626.toInt())
     }
 
-    private fun buildRecurrenceRule(index: Int, date: LocalDate): JSONObject {
+    private fun buildRecurrenceRule(
+        index: Int,
+        date: LocalDate,
+        interval: Int,
+        weekdays: List<Int>,
+        monthlyMode: Int,
+        lunar: Boolean,
+    ): JSONObject {
         val weekday = if (date.dayOfWeek.value == 7) 0 else date.dayOfWeek.value
         return when (index) {
-            0 -> JSONObject().put("frequency", "daily").put("interval", 1)
-            1 -> JSONObject().put("frequency", "weekly").put("interval", 1).put("weekdays", JSONArray(listOf(weekday)))
-            2 -> JSONObject().put("frequency", "monthly").put("interval", 1).put("monthDay", date.dayOfMonth)
-            else -> JSONObject().put("frequency", "yearly").put("interval", 1)
+            0 -> JSONObject().put("frequency", "daily").put("interval", interval)
+            1 -> JSONObject()
+                .put("frequency", "weekly")
+                .put("interval", interval.coerceIn(1, 3))
+                .put("weekdays", JSONArray(weekdays.ifEmpty { listOf(weekday) }))
+            2 -> JSONObject()
+                .put("frequency", "monthly")
+                .put("interval", interval)
+                .put("mode", if (monthlyMode == 1) "nthWeekday" else "monthDay")
+                .put("monthDay", date.dayOfMonth)
+                .put("weekOfMonth", ((date.dayOfMonth - 1) / 7) + 1)
+                .put("weekday", weekday)
+            else -> JSONObject()
+                .put("frequency", "yearly")
+                .put("interval", interval)
+                .put("lunar", lunar)
+                .put("lunarMonth", date.monthValue)
+                .put("lunarDay", date.dayOfMonth)
         }
     }
 
@@ -1377,5 +1462,5 @@ private fun cellParams(height: Int) = GridLayout.LayoutParams().apply {
     width = 0
     this.height = height.dp()
     columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-    setMargins(2.dp(), 2.dp(), 2.dp(), 2.dp())
+    setMargins(0, 0, 0, 0)
 }

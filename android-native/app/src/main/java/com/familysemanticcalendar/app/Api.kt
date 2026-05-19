@@ -1,6 +1,8 @@
 package com.familysemanticcalendar.app
 
 import android.content.Context
+import android.icu.util.ChineseCalendar
+import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -325,10 +327,38 @@ private fun EventItem.occursOn(date: LocalDate): Boolean {
             java.time.temporal.ChronoUnit.WEEKS.between(startDate, date) % interval == 0L && weekdayMatches
         }
         "monthly" -> {
-            val monthDay = recurrenceRule.optInt("monthDay", startDate.dayOfMonth)
-            java.time.temporal.ChronoUnit.MONTHS.between(YearMonth.from(startDate), YearMonth.from(date)) % interval == 0L && date.dayOfMonth == monthDay
+            val monthMatches = java.time.temporal.ChronoUnit.MONTHS.between(YearMonth.from(startDate), YearMonth.from(date)) % interval == 0L
+            if (!monthMatches) {
+                false
+            } else if (recurrenceRule.optString("mode") == "nthWeekday") {
+                val weekday = if (date.dayOfWeek.value == 7) 0 else date.dayOfWeek.value
+                val weekOfMonth = ((date.dayOfMonth - 1) / 7) + 1
+                weekday == recurrenceRule.optInt("weekday", if (startDate.dayOfWeek.value == 7) 0 else startDate.dayOfWeek.value) &&
+                    weekOfMonth == recurrenceRule.optInt("weekOfMonth", ((startDate.dayOfMonth - 1) / 7) + 1)
+            } else {
+                val monthDay = recurrenceRule.optInt("monthDay", startDate.dayOfMonth)
+                date.dayOfMonth == monthDay
+            }
         }
-        "yearly" -> date.monthValue == startDate.monthValue && date.dayOfMonth == startDate.dayOfMonth
+        "yearly" -> {
+            val yearMatches = java.time.temporal.ChronoUnit.YEARS.between(startDate, date) % interval == 0L
+            if (!yearMatches) {
+                false
+            } else if (recurrenceRule.optBoolean("lunar", false)) {
+                val lunar = lunarMonthDay(date) ?: return false
+                lunar.first == recurrenceRule.optInt("lunarMonth", startDate.monthValue) &&
+                    lunar.second == recurrenceRule.optInt("lunarDay", startDate.dayOfMonth)
+            } else {
+                date.monthValue == startDate.monthValue && date.dayOfMonth == startDate.dayOfMonth
+            }
+        }
         else -> false
     }
+}
+
+private fun lunarMonthDay(date: LocalDate): Pair<Int, Int>? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
+    val calendar = ChineseCalendar()
+    calendar.set(date.year, date.monthValue - 1, date.dayOfMonth)
+    return (calendar.get(ChineseCalendar.MONTH) + 1) to calendar.get(ChineseCalendar.DAY_OF_MONTH)
 }
