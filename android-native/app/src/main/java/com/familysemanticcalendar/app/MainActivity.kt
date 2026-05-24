@@ -821,7 +821,9 @@ class MainActivity : Activity() {
                     dayEvents.forEach { add(CellRow(it)) }
                 }
                 val maxRows = ((calendarCellHeight() - 19) / 12).coerceIn(1, 6)
-                rows.take(maxRows).forEachIndexed { index, row ->
+                val hiddenEventCount = if (rows.size > maxRows) rows.drop(maxRows - 1).count { it.event != null } else 0
+                val visibleRows = if (hiddenEventCount > 0) rows.take(maxRows - 1) else rows.take(maxRows)
+                visibleRows.forEach { row ->
                     if (row.holidayText != null || row.event == null) {
                         cell.addView(TextView(this).text(row.holidayText ?: " ").size(8).apply {
                             setTextColor(0xFFDC2626.toInt())
@@ -831,21 +833,19 @@ class MainActivity : Activity() {
                         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
                             topMargin = 1.dp()
                         })
-                        return@forEachIndexed
+                        return@forEach
                     }
                     val event = row.event
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
-                    val rowCount = realEvents.size + if (holiday == null) 0 else 1
-                    val moreText = if (index == maxRows - 1 && rowCount > maxRows) " ..." else ""
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
                     val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
                     val title = when {
-                        !multiDay -> "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText"
+                        !multiDay -> event.title.take(8)
                         else -> {
                             val visibleTitle = if (segmentStart) event.title.take(9) else ""
-                            "$visibleTitle$moreText"
+                            visibleTitle
                         }
                     }
                     cell.addView(TextView(this).text(title).size(8).apply {
@@ -863,6 +863,17 @@ class MainActivity : Activity() {
                         if (!multiDay) {
                             rightMargin = 3.dp()
                         }
+                    })
+                }
+                if (hiddenEventCount > 0) {
+                    cell.addView(TextView(this).text("+$hiddenEventCount").size(8).apply {
+                        setTextColor(slate600)
+                        maxLines = 1
+                        includeFontPadding = false
+                        gravity = Gravity.START
+                        setPadding(3.dp(), 0, 0, 0)
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
+                        topMargin = 1.dp()
                     })
                 }
             }
