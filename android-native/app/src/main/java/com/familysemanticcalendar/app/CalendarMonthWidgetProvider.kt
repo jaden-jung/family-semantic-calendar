@@ -6,6 +6,10 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.BackgroundColorSpan
+import android.text.style.ForegroundColorSpan
 import android.widget.RemoteViews
 import java.time.LocalDate
 import java.time.YearMonth
@@ -25,7 +29,7 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                     val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
                     WidgetMonthData(events, null)
                 }
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 WidgetMonthData(emptyList(), "달력을 불러오지 못함")
             }
             appWidgetIds.forEach { widgetId ->
@@ -36,63 +40,183 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
 
     private fun monthTitle(): String {
         val today = LocalDate.now()
-        return "${today.year}.${today.monthValue}"
+        return "${today.year}년 ${today.monthValue}월"
     }
 
-    private fun render(context: Context, manager: AppWidgetManager, widgetId: Int, title: String, events: List<EventItem>, isLoading: Boolean, status: String? = null) {
+    private fun render(
+        context: Context,
+        manager: AppWidgetManager,
+        widgetId: Int,
+        title: String,
+        events: List<EventItem>,
+        isLoading: Boolean,
+        status: String? = null,
+    ) {
+        val intent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(context, 1, intent, PendingIntent.FLAG_IMMUTABLE)
         val views = RemoteViews(context.packageName, R.layout.widget_month).apply {
             setTextViewText(R.id.monthWidgetTitle, if (isLoading) "$title 불러오는 중" else title)
-            fillMonthCells(this, events, isLoading, status)
-            val intent = Intent(context, MainActivity::class.java)
-            val pendingIntent = PendingIntent.getActivity(context, 1, intent, PendingIntent.FLAG_IMMUTABLE)
             setOnClickPendingIntent(R.id.monthWidgetRoot, pendingIntent)
+            fillMonthCells(this, events, isLoading, status, pendingIntent)
         }
         manager.updateAppWidget(widgetId, views)
     }
 
-    private fun fillMonthCells(views: RemoteViews, events: List<EventItem>, isLoading: Boolean, status: String?) {
+    private fun fillMonthCells(
+        views: RemoteViews,
+        events: List<EventItem>,
+        isLoading: Boolean,
+        status: String?,
+        pendingIntent: PendingIntent,
+    ) {
         val month = YearMonth.now()
         val first = month.atDay(1)
         val start = first.minusDays((first.dayOfWeek.value % 7).toLong())
         val today = LocalDate.now()
+        val eventCache = mutableMapOf<LocalDate, List<EventItem?>>()
+        val slotCache = mutableMapOf<LocalDate, Map<String, Int>>()
+
         cellIds.forEachIndexed { index, cellId ->
             val date = start.plusDays(index.toLong())
-            val dayEvents = if (isLoading) emptyList() else eventsForDate(events, date)
+            val dayEvents = if (isLoading) emptyList() else widgetEventsForDate(events, date, eventCache, slotCache)
             val holiday = holidayName(date)
-            val isCurrentMonth = date.month == month.month
-            val isSunday = date.dayOfWeek.value == 7
-            val isSaturday = date.dayOfWeek.value == 6
-            val textLines = mutableListOf<String>()
-            textLines.add(date.dayOfMonth.toString())
-            if (holiday != null) textLines.add(holiday)
-            if (dayEvents.isNotEmpty()) {
-                val colorCount = dayEvents.map { it.calendarId }.distinct().take(3).size
-                val dots = "●".repeat(colorCount)
-                textLines.add("$dots ${dayEvents.first().title}")
+            val currentMonth = date.month == month.month
+            val sunday = date.dayOfWeek.value == 7
+            val saturday = date.dayOfWeek.value == 6
+            val dateColor = when {
+                !currentMonth -> Color.rgb(148, 163, 184)
+                holiday != null || sunday -> Color.rgb(220, 38, 38)
+                saturday -> Color.rgb(37, 99, 235)
+                else -> Color.rgb(15, 23, 42)
             }
-            views.setTextViewText(cellId, textLines.joinToString("\n"))
-            views.setTextColor(
+
+            views.setTextViewText(
                 cellId,
-                when {
-                    !isCurrentMonth -> Color.rgb(148, 163, 184)
-                    holiday != null || isSunday -> Color.rgb(220, 38, 38)
-                    isSaturday -> Color.rgb(37, 99, 235)
-                    else -> Color.rgb(15, 23, 42)
-                }
+                widgetCellText(
+                    date = date,
+                    holiday = holiday,
+                    dayEvents = dayEvents,
+                    maxRows = if (holiday == null) 7 else 6,
+                    dateColor = dateColor,
+                    defaultColor = if (currentMonth) Color.rgb(15, 23, 42) else Color.rgb(148, 163, 184),
+                ),
             )
-            val bgColor = when {
-                date == today -> Color.rgb(204, 251, 241)
-                dayEvents.isNotEmpty() -> softColor(calendarColor(dayEvents.first().calendarId))
-                !isCurrentMonth -> Color.rgb(248, 250, 252)
-                else -> Color.WHITE
-            }
-            views.setInt(cellId, "setBackgroundColor", bgColor)
+            views.setTextColor(cellId, if (currentMonth) Color.rgb(15, 23, 42) else Color.rgb(148, 163, 184))
+            views.setInt(
+                cellId,
+                "setBackgroundColor",
+                when {
+                    date == today -> Color.rgb(204, 251, 241)
+                    !currentMonth -> Color.rgb(248, 250, 252)
+                    else -> Color.WHITE
+                },
+            )
+            views.setOnClickPendingIntent(cellId, pendingIntent)
         }
+
         if (status != null) {
             views.setTextViewText(R.id.mw_d0, status)
             views.setTextColor(R.id.mw_d0, Color.rgb(71, 85, 105))
             views.setInt(R.id.mw_d0, "setBackgroundColor", Color.rgb(248, 250, 252))
         }
+    }
+
+    private fun widgetCellText(
+        date: LocalDate,
+        holiday: String?,
+        dayEvents: List<EventItem?>,
+        maxRows: Int,
+        dateColor: Int,
+        defaultColor: Int,
+    ): SpannableString {
+        val realEvents = dayEvents.filterNotNull()
+        val visibleEvents = if (realEvents.size > maxRows) {
+            dayEvents.take((maxRows - 1).coerceAtLeast(0))
+        } else {
+            dayEvents.take(maxRows)
+        }
+        val hiddenCount = (realEvents.size - visibleEvents.filterNotNull().size).coerceAtLeast(0)
+        val lines = mutableListOf<WidgetLine>()
+        lines.add(WidgetLine(date.dayOfMonth.toString(), dateColor, null))
+        if (holiday != null) lines.add(WidgetLine(holiday, Color.rgb(220, 38, 38), null))
+        visibleEvents.forEach { event ->
+            if (event == null) {
+                lines.add(WidgetLine(" ", defaultColor, null))
+            } else {
+                val multiDay = event.isMultiDay()
+                val text = if (multiDay) {
+                    val segmentStart = event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7
+                    if (segmentStart) event.title.take(8) else " "
+                } else {
+                    event.title.take(8)
+                }
+                lines.add(WidgetLine(text, defaultColor, softColor(calendarColor(event.calendarId))))
+            }
+        }
+        if (hiddenCount > 0) lines.add(WidgetLine("+$hiddenCount", Color.rgb(71, 85, 105), null))
+
+        val raw = lines.joinToString("\n") { it.text }
+        val spannable = SpannableString(raw)
+        var offset = 0
+        lines.forEach { line ->
+            val end = offset + line.text.length
+            if (end > offset) {
+                spannable.setSpan(ForegroundColorSpan(line.color), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (line.backgroundColor != null && line.text.isNotBlank()) {
+                    spannable.setSpan(BackgroundColorSpan(line.backgroundColor), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+            offset = end + 1
+        }
+        return spannable
+    }
+
+    private fun widgetEventsForDate(
+        events: List<EventItem>,
+        date: LocalDate,
+        eventCache: MutableMap<LocalDate, List<EventItem?>>,
+        slotCache: MutableMap<LocalDate, Map<String, Int>>,
+    ): List<EventItem?> {
+        eventCache[date]?.let { return it }
+        val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
+        val slotByEventId = slotCache.getOrPut(weekStart) { widgetMultiDaySlotsForWeek(events, weekStart) }
+        val dayEvents = eventsForDate(events, date)
+        val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
+        val lastActiveSlot = activeMultiDayEvents.mapNotNull { slotByEventId[it.id] }.maxOrNull() ?: -1
+        val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
+        activeMultiDayEvents.forEach { event ->
+            val slot = slotByEventId[event.id]
+            if (slot != null && slot in slots.indices) slots[slot] = event
+        }
+        val singleDayEvents = dayEvents.filterNot { it.isMultiDay() }.toMutableList()
+        return (slots.map { it ?: singleDayEvents.removeFirstOrNull() } + singleDayEvents).also {
+            eventCache[date] = it
+        }
+    }
+
+    private fun widgetMultiDaySlotsForWeek(events: List<EventItem>, weekStart: LocalDate): Map<String, Int> {
+        val weekDates = (0..6).map { weekStart.plusDays(it.toLong()) }
+        val weekMultiDayEvents = weekDates
+            .flatMap { day -> eventsForDate(events, day).filter { it.isMultiDay() } }
+            .distinctBy { it.id }
+            .sortedWith(
+                compareBy<EventItem> { it.startsAt.toLocalDate() }
+                    .thenBy { it.startsAt.toLocalTime() }
+                    .thenBy { it.title }
+            )
+        val slotEnds = mutableListOf<LocalDate>()
+        val slotByEventId = mutableMapOf<String, Int>()
+        weekMultiDayEvents.forEach { event ->
+            val eventStart = event.startsAt.toLocalDate()
+            val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
+            val segmentStart = maxOf(eventStart, weekStart)
+            val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
+            val reusableSlot = slotEnds.indexOfFirst { it.isBefore(segmentStart) }
+            val slot = if (reusableSlot >= 0) reusableSlot else slotEnds.size.also { slotEnds.add(segmentEnd) }
+            slotEnds[slot] = segmentEnd
+            slotByEventId[event.id] = slot
+        }
+        return slotByEventId
     }
 
     private fun softColor(color: Int): Int {
@@ -131,4 +255,5 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
     }
 
     private data class WidgetMonthData(val events: List<EventItem>, val status: String?)
+    private data class WidgetLine(val text: String, val color: Int, val backgroundColor: Int?)
 }
