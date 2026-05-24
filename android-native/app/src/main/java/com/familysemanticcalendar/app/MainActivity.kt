@@ -938,7 +938,7 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                 }
-                realEvents.map { calendarColor(it.calendarId) }.distinct().take(4).forEach { color ->
+                realEvents.map { ownerColor(it.createdBy) }.distinct().take(4).forEach { color ->
                     dots.addView(View(this).apply {
                         background = rounded(color, 999.dp())
                     }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
@@ -983,14 +983,7 @@ class MainActivity : Activity() {
                         !multiDay -> event.title.take(8)
                         else -> ""
                     }
-                    cell.addView(TextView(this).text(title).size(eventTextSize).apply {
-                        setTextColor(slate900)
-                        maxLines = 1
-                        includeFontPadding = false
-                        gravity = Gravity.START
-                        background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
-                        setPadding(if (!multiDay || segmentStart) 3.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, childHeightDp.dp()).apply {
+                    cell.addView(eventChipView(event, title, eventTextSize, multiDay, segmentStart), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, childHeightDp.dp()).apply {
                         topMargin = 1.dp()
                         if (!multiDay || segmentStart) {
                             leftMargin = 3.dp()
@@ -1015,11 +1008,38 @@ class MainActivity : Activity() {
         return cell
     }
 
+    private fun eventChipView(
+        event: EventItem,
+        title: String,
+        textSize: Int,
+        multiDay: Boolean,
+        segmentStart: Boolean,
+    ): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
+            if (!multiDay || segmentStart) {
+                addView(View(this@MainActivity).apply {
+                    background = rounded(ownerColor(event.createdBy), if (multiDay) 0 else 3.dp())
+                }, LinearLayout.LayoutParams(3.dp(), LinearLayout.LayoutParams.MATCH_PARENT))
+            }
+            addView(TextView(this@MainActivity).text(title).size(textSize).apply {
+                setTextColor(slate900)
+                maxLines = 1
+                includeFontPadding = false
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(if (!multiDay || segmentStart) 2.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+        }
+    }
+
     private inner class MultiDayTitleOverlay(context: Context, private var month: YearMonth) : View(context) {
         private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = slate900
             textSize = 8f * resources.displayMetrics.scaledDensity
         }
+        private val ownerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         init {
             isClickable = false
@@ -1058,10 +1078,14 @@ class MainActivity : Activity() {
                     val right = (endCol + 1) * cellWidth - 4.dp()
                     val top = headerHeight + row * cellHeight + eventTopOffset + slot * rowHeight
                     val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
+                    if (label.isNotBlank()) {
+                        ownerPaint.color = ownerColor(event.createdBy)
+                        canvas.drawRect(left, top, left + 3.dp(), top + childHeight, ownerPaint)
+                    }
                     if (label.isBlank()) return@forEach
                     val save = canvas.save()
-                    canvas.clipRect(left, top, right, top + childHeight)
-                    canvas.drawText(label, left, top + 9.dp(), titlePaint)
+                    canvas.clipRect(left + 5.dp(), top, right, top + childHeight)
+                    canvas.drawText(label, left + 5.dp(), top + 9.dp(), titlePaint)
                     canvas.restoreToCount(save)
                 }
             }
@@ -1099,6 +1123,11 @@ class MainActivity : Activity() {
             row.addView(View(this).apply {
                 background = rounded(calendarColor(event.calendarId), 999.dp())
             }, LinearLayout.LayoutParams(5.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
+                rightMargin = 4.dp()
+            })
+            row.addView(View(this).apply {
+                background = rounded(ownerColor(event.createdBy), 999.dp())
+            }, LinearLayout.LayoutParams(4.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
                 rightMargin = 10.dp()
             })
             val texts = LinearLayout(this).vertical()
@@ -2058,6 +2087,14 @@ private val calendarPalette = listOf(
     0xFFBE123C.toInt(),
     0xFF15803D.toInt(),
 )
+private val ownerPalette = listOf(
+    0xFF2563EB.toInt(),
+    0xFFDB2777.toInt(),
+    0xFFF59E0B.toInt(),
+    0xFF7C3AED.toInt(),
+    0xFF0891B2.toInt(),
+    0xFF16A34A.toInt(),
+)
 
 private fun Int.dp(): Int = (this * android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 private fun LinearLayout.vertical(): LinearLayout = apply { orientation = LinearLayout.VERTICAL }
@@ -2121,6 +2158,11 @@ private fun Button.eventButton(): Button = apply {
 private fun calendarColor(calendarId: String): Int {
     val index = kotlin.math.abs(calendarId.hashCode()) % calendarPalette.size
     return calendarPalette[index]
+}
+private fun ownerColor(ownerId: String?): Int {
+    if (ownerId == null || ownerId == ALL_OWNER_ID) return 0xFF64748B.toInt()
+    val index = kotlin.math.abs(ownerId.hashCode()) % ownerPalette.size
+    return ownerPalette[index]
 }
 private fun softCalendarColor(color: Int): Int {
     return Color.rgb(
