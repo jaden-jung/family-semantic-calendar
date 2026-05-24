@@ -73,6 +73,8 @@ class MainActivity : Activity() {
     private var resizeHandleTop = -1
     private var resizeHandleBottom = -1
     private var resizeGestureAllowed = false
+    private val calendarEventCache = mutableMapOf<LocalDate, List<EventItem?>>()
+    private val multiDaySlotCache = mutableMapOf<LocalDate, Map<String, Int>>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -393,6 +395,8 @@ class MainActivity : Activity() {
         }
         root.addView(progress, wrapCenter(top = 8))
 
+        calendarEventCache.clear()
+        multiDaySlotCache.clear()
         drawCalendar(previousGrid, visibleMonth.minusMonths(1))
         drawCalendar(nextGrid, visibleMonth.plusMonths(1))
         drawCalendar(calendarGrid, visibleMonth)
@@ -691,7 +695,25 @@ class MainActivity : Activity() {
     }
 
     private fun calendarEventsForDate(date: LocalDate): List<EventItem?> {
+        calendarEventCache[date]?.let { return it }
         val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
+        val slotByEventId = multiDaySlotCache.getOrPut(weekStart) { multiDaySlotsForWeek(weekStart) }
+        val dayEvents = eventsForDate(events, date)
+        val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
+        val lastActiveSlot = activeMultiDayEvents
+            .mapNotNull { slotByEventId[it.id] }
+            .maxOrNull() ?: -1
+        val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
+        activeMultiDayEvents.forEach { event ->
+            val slot = slotByEventId[event.id]
+            if (slot != null && slot in slots.indices) slots[slot] = event
+        }
+        return (slots + dayEvents.filterNot { it.isMultiDay() }).also {
+            calendarEventCache[date] = it
+        }
+    }
+
+    private fun multiDaySlotsForWeek(weekStart: LocalDate): Map<String, Int> {
         val weekDates = (0..6).map { weekStart.plusDays(it.toLong()) }
         val weekMultiDayEvents = weekDates
             .flatMap { day -> eventsForDate(events, day).filter { it.isMultiDay() } }
@@ -713,18 +735,7 @@ class MainActivity : Activity() {
             slotEnds[slot] = segmentEnd
             slotByEventId[event.id] = slot
         }
-
-        val dayEvents = eventsForDate(events, date)
-        val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
-        val lastActiveSlot = activeMultiDayEvents
-            .mapNotNull { slotByEventId[it.id] }
-            .maxOrNull() ?: -1
-        val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
-        activeMultiDayEvents.forEach { event ->
-            val slot = slotByEventId[event.id]
-            if (slot != null && slot in slots.indices) slots[slot] = event
-        }
-        return slots + dayEvents.filterNot { it.isMultiDay() }
+        return slotByEventId
     }
 
     private fun replaceCalendarCell(date: LocalDate) {
