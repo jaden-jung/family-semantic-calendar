@@ -246,8 +246,8 @@ object CalendarApi {
             .put("starts_at", startsAt.toString())
         if (ownerId == null) payload.put("created_by", JSONObject.NULL) else payload.put("created_by", ownerId)
         if (calendarId != null) payload.put("calendar_id", calendarId)
-        if (endsAt != null) payload.put("ends_at", endsAt.toString())
-        if (recurrenceRule != null) payload.put("recurrence_rule", recurrenceRule)
+        payload.put("ends_at", endsAt?.toString() ?: JSONObject.NULL)
+        payload.put("recurrence_rule", recurrenceRule ?: JSONObject.NULL)
         return payload
     }
 

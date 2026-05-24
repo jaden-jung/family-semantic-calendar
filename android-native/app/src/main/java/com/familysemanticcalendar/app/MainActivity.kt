@@ -840,8 +840,7 @@ class MainActivity : Activity() {
                     val title = when {
                         !multiDay -> "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText"
                         else -> {
-                            val chunk = event.title.drop(segmentOffset * 7).take(7)
-                            val visibleTitle = if (segmentOffset > 0 && chunk.length <= 2) event.title.take(7) else chunk.ifBlank { event.title.take(7) }
+                            val visibleTitle = if (segmentStart) event.title.take(9) else ""
                             "$visibleTitle$moreText"
                         }
                     }
@@ -937,10 +936,16 @@ class MainActivity : Activity() {
             toast("먼저 달력을 만들어 주세요.")
             return
         }
+        fun hasExplicitTime(item: EventItem): Boolean {
+            val endTime = item.endsAt?.toLocalTime()
+            return item.startsAt.toLocalTime() != LocalTime.MIDNIGHT ||
+                (endTime != null && endTime != LocalTime.of(23, 59))
+        }
+        val eventHasTime = event?.let { hasExplicitTime(it) } == true
         var date = event?.startsAt?.toLocalDate() ?: selectedDate.takeIf { dateSelected } ?: LocalDate.now()
-        var time = event?.startsAt?.toLocalTime() ?: LocalTime.of(9, 0)
+        var time = if (event == null || eventHasTime) event?.startsAt?.toLocalTime() ?: LocalTime.of(9, 0) else LocalTime.of(9, 0)
         var endDate = event?.endsAt?.toLocalDate() ?: date
-        var endTime = event?.endsAt?.toLocalTime() ?: time
+        var endTime = if (event == null || eventHasTime) event?.endsAt?.toLocalTime() ?: time.plusHours(1) else time.plusHours(1)
 
         val root = LinearLayout(this).vertical().apply {
             setPadding(18.dp(), 6.dp(), 18.dp(), 10.dp())
@@ -1007,7 +1012,7 @@ class MainActivity : Activity() {
         val dateButton = stylePicker(Button(this).apply { text = date.format(dateFormatter) })
         val timeCheck = CheckBox(this).apply {
             text = "시간 선택"
-            isChecked = event != null && event.startsAt.toLocalTime() != LocalTime.MIDNIGHT
+            isChecked = eventHasTime
             setTextColor(slate900)
         }
         val periodCheck = CheckBox(this).apply {
@@ -1154,7 +1159,11 @@ class MainActivity : Activity() {
             }
         }
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
-        timeCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
+        timeCheck.setOnCheckedChangeListener { _, checked ->
+            if (checked && time == LocalTime.MIDNIGHT) time = LocalTime.of(9, 0)
+            if (checked && (endTime == LocalTime.MIDNIGHT || endTime == LocalTime.of(23, 59))) endTime = time.plusHours(1)
+            refreshButtons()
+        }
         repeatCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         repeatSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) = refreshButtons()
