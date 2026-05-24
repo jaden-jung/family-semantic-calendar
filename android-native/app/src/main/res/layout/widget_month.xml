@@ -31,7 +31,12 @@
         <TextView style="@style/MonthWidgetWeekday" android:text="토" android:textColor="#2563EB" />
     </LinearLayout>
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#CBD5E1"
+        android:orientation="vertical">
         <LinearLayout style="@style/MonthWidgetWeekRow">
             <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d0" />
             <TextView style="@style/MonthWidgetDayCell" android:id="@+id/mw_d1" />
