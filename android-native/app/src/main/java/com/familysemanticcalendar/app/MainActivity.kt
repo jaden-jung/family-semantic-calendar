@@ -10,7 +10,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -293,24 +295,12 @@ class MainActivity : Activity() {
             setPadding(12.dp(), 7.dp(), 12.dp(), 7.dp())
             setOnClickListener { showVisibleCalendarsDialog() }
         }
-        val calendarGrid = GridLayout(this).apply {
-            columnCount = 7
-            rowCount = 7
-            background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
-            setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
-        }
-        val previousGrid = GridLayout(this).apply {
-            columnCount = 7
-            rowCount = 7
-            background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
-            setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
-        }
-        val nextGrid = GridLayout(this).apply {
-            columnCount = 7
-            rowCount = 7
-            background = rounded(Color.WHITE, 12.dp(), strokeColor = borderColor)
-            setPadding(4.dp(), 4.dp(), 4.dp(), 4.dp())
-        }
+        val calendarGrid = calendarGridView()
+        val previousGrid = calendarGridView()
+        val nextGrid = calendarGridView()
+        val calendarPage = calendarPage(calendarGrid, visibleMonth)
+        val previousPage = calendarPage(previousGrid, visibleMonth.minusMonths(1))
+        val nextPage = calendarPage(nextGrid, visibleMonth.plusMonths(1))
         val calendarFrame = FrameLayout(this).apply {
             clipChildren = false
             clipToPadding = false
@@ -362,9 +352,9 @@ class MainActivity : Activity() {
         })
         root.addView(top, matchWrap())
         root.addView(calendarTitle, matchWrap(top = 4))
-        calendarFrame.addView(previousGrid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        calendarFrame.addView(nextGrid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        calendarFrame.addView(calendarGrid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        calendarFrame.addView(previousPage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        calendarFrame.addView(nextPage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        calendarFrame.addView(calendarPage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         root.addView(
             calendarFrame,
             if (listHidden) {
@@ -403,11 +393,11 @@ class MainActivity : Activity() {
         drawEventList(eventList, listTitle)
         currentEventList = eventList
         currentListTitle = listTitle
-        activeSwipeViews = listOf(calendarGrid, listPanel)
+        activeSwipeViews = listOf(calendarPage, listPanel)
         currentCalendarGrid = calendarGrid
-        currentMonthView = calendarGrid
-        previousMonthView = previousGrid
-        nextMonthView = nextGrid
+        currentMonthView = calendarPage
+        previousMonthView = previousPage
+        nextMonthView = nextPage
         prepareAdjacentMonthViews()
         frame.addView(root, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
@@ -415,19 +405,19 @@ class MainActivity : Activity() {
             bottomMargin = systemBarBottomPadding() + 18.dp()
         })
         setContentView(frame)
-        playMonthTransition(calendarGrid, listPanel)
+        playMonthTransition(calendarPage, listPanel)
     }
 
     private fun calendarHeight(): Int {
         val header = 32
         val cell = calendarCellHeight()
         val rowMargins = 0
-        val gridPadding = 8
+        val gridPadding = 0
         return (header + 6 * cell + rowMargins + gridPadding).dp()
     }
 
     private fun calendarCellHeight(): Int {
-        if (!listHidden) return if (listExpanded) 36 else 66
+        if (!listHidden) return if (listExpanded) 37 else 67
         val density = resources.displayMetrics.density
         val reservedPx = systemBarTopPadding() +
             systemBarBottomPadding() +
@@ -651,6 +641,24 @@ class MainActivity : Activity() {
         )
     }
 
+    private fun calendarGridView(): GridLayout {
+        return GridLayout(this).apply {
+            columnCount = 7
+            rowCount = 7
+            background = null
+            setPadding(0, 0, 0, 0)
+        }
+    }
+
+    private fun calendarPage(grid: GridLayout, month: YearMonth): FrameLayout {
+        return FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+            addView(grid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(MultiDayTitleOverlay(this@MainActivity, month), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+    }
+
     private fun drawCalendar(grid: GridLayout, month: YearMonth = visibleMonth) {
         grid.removeAllViews()
         listOf("일", "월", "화", "수", "목", "금", "토").forEachIndexed { index, label ->
@@ -862,15 +870,9 @@ class MainActivity : Activity() {
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
-                    val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
-                    val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
-                    val titleChunkSize = 5
                     val title = when {
                         !multiDay -> event.title.take(8)
-                        else -> {
-                            val visibleTitle = event.title.drop(segmentOffset * titleChunkSize).take(titleChunkSize)
-                            visibleTitle
-                        }
+                        else -> ""
                     }
                     cell.addView(TextView(this).text(title).size(eventTextSize).apply {
                         setTextColor(slate900)
@@ -902,6 +904,54 @@ class MainActivity : Activity() {
             }
         }
         return cell
+    }
+
+    private inner class MultiDayTitleOverlay(context: Context, private val month: YearMonth) : View(context) {
+        private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = slate900
+            textSize = 8f * resources.displayMetrics.scaledDensity
+        }
+
+        init {
+            isClickable = false
+            isFocusable = false
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            if (listExpanded || width <= 0 || height <= 0) return
+            val headerHeight = 32.dp().toFloat()
+            val cellWidth = width / 7f
+            val cellHeight = calendarCellHeight().dp().toFloat()
+            val eventTopOffset = (if (listExpanded) 3 else 2).dp() + 14.dp()
+            val rowHeight = 12.dp().toFloat()
+            val childHeight = 11.dp().toFloat()
+            val start = calendarGridStart(month)
+
+            repeat(6) { row ->
+                val weekStart = start.plusDays((row * 7).toLong())
+                val slotByEventId = multiDaySlotsForWeek(weekStart)
+                slotByEventId.entries.sortedBy { it.value }.forEach { (eventId, slot) ->
+                    val event = events.firstOrNull { it.id == eventId } ?: return@forEach
+                    val eventStart = event.startsAt.toLocalDate()
+                    val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
+                    val segmentStart = maxOf(eventStart, weekStart)
+                    val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
+                    if (segmentEnd.isBefore(segmentStart)) return@forEach
+                    val startCol = segmentStart.dayOfWeek.value % 7
+                    val endCol = segmentEnd.dayOfWeek.value % 7
+                    val left = startCol * cellWidth + 6.dp()
+                    val right = (endCol + 1) * cellWidth - 4.dp()
+                    val top = headerHeight + row * cellHeight + eventTopOffset + slot * rowHeight
+                    val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
+                    if (label.isBlank()) return@forEach
+                    val save = canvas.save()
+                    canvas.clipRect(left, top, right, top + childHeight)
+                    canvas.drawText(label, left, top + 9.dp(), titlePaint)
+                    canvas.restoreToCount(save)
+                }
+            }
+        }
     }
 
     private fun drawEventList(container: LinearLayout, title: TextView) {
