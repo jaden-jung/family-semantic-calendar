@@ -587,7 +587,7 @@ class MainActivity : Activity() {
                 monthTransitionDirection = 0
                 visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
                 rotateMonthPages(direction)
-                redrawMonthPages()
+                redrawAdjacentMonthPages()
             }
             .start()
     }
@@ -700,12 +700,9 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun redrawMonthPages() {
+    private fun redrawAdjacentMonthPages() {
         val previousGrid = previousCalendarGrid ?: return
-        val currentGrid = currentCalendarGrid ?: return
         val nextGrid = nextCalendarGrid ?: return
-        calendarEventCache.clear()
-        multiDaySlotCache.clear()
         val previousMonth = visibleMonth.minusMonths(1)
         val nextMonth = visibleMonth.plusMonths(1)
         currentMonthTitle?.text = visibleMonth.format(monthFormatter)
@@ -713,7 +710,6 @@ class MainActivity : Activity() {
         currentMonthOverlay?.setMonth(visibleMonth)
         nextMonthOverlay?.setMonth(nextMonth)
         drawCalendar(previousGrid, previousMonth)
-        drawCalendar(currentGrid, visibleMonth)
         drawCalendar(nextGrid, nextMonth)
         refreshCurrentEventList()
         currentMonthView?.apply {
