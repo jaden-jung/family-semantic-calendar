@@ -29,6 +29,7 @@ import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.NumberPicker
 import android.widget.ProgressBar
+import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.ArrayAdapter
@@ -394,10 +395,14 @@ class MainActivity : Activity() {
         return (header + 6 * cell + rowMargins + gridPadding).dp()
     }
 
-    private fun calendarCellHeight(): Int = when {
-        listHidden -> 78
-        listExpanded -> 36
-        else -> 66
+    private fun calendarCellHeight(): Int {
+        if (!listHidden) return if (listExpanded) 36 else 66
+        val density = resources.displayMetrics.density
+        val reservedPx = systemBarTopPadding() +
+            systemBarBottomPadding() +
+            10.dp() + 40.dp() + 4.dp() + 34.dp() + 10.dp() + 32.dp() + 8.dp() + 72.dp()
+        val cellPx = ((resources.displayMetrics.heightPixels - reservedPx) / 6).coerceAtLeast(78.dp())
+        return (cellPx / density).toInt()
     }
 
     private fun playMonthTransition(vararg views: View) {
@@ -1262,32 +1267,77 @@ class MainActivity : Activity() {
             toast("검색할 달력이 없습니다.")
             return
         }
+        val searchCalendarIds = visibleCalendars().map { it.id }.toMutableSet()
         val input = dialogInput("검색어").apply {
             hint = "검색어"
             setSingleLine(true)
         }
-        val content = dialogPanel().apply {
-            addView(TextView(this@MainActivity).text("일정 검색").size(20).bold().apply {
-                setTextColor(slate900)
-            }, matchWrap())
-            addView(TextView(this@MainActivity).text(activeCalendarLabel()).size(12).apply {
-                setTextColor(slate600)
-            }, matchWrap(top = 4))
-            addView(input, matchWrap(top = 14))
+        val resultList = LinearLayout(this).vertical()
+        val resultCaption = TextView(this).text("검색어를 입력하고 조회하세요.").size(12).apply {
+            setTextColor(slate600)
         }
-        AlertDialog.Builder(this)
-            .setView(content)
-            .setNegativeButton("취소", null)
-            .setPositiveButton("검색") { _, _ ->
-                val query = input.text.toString().trim()
-                if (query.isNotBlank()) {
+        val content = dialogPanel()
+        content.addView(TextView(this).text("일정 검색").size(20).bold().apply {
+            setTextColor(slate900)
+        }, matchWrap())
+        content.addView(TextView(this).text("검색할 달력").size(12).apply {
+            setTextColor(slate600)
+        }, matchWrap(top = 10))
+        calendars.forEach { calendar ->
+            content.addView(CheckBox(this).apply {
+                text = calendar.name
+                isChecked = calendar.id in searchCalendarIds
+                setTextColor(slate900)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) searchCalendarIds.add(calendar.id) else searchCalendarIds.remove(calendar.id)
+                }
+            }, matchWrap(top = 2))
+        }
+        content.addView(input, matchWrap(top = 12))
+        val searchButton = Button(this).apply {
+            text = "검색"
+            primaryButton()
+        }
+        content.addView(searchButton, matchWrap(top = 10))
+        content.addView(resultCaption, matchWrap(top = 14))
+        content.addView(resultList, matchWrap(top = 6))
+        val dialog = AlertDialog.Builder(this)
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton("닫기", null)
+            .create()
+        fun renderResults(results: List<EventItem>) {
+            resultList.removeAllViews()
+            resultCaption.text = if (results.isEmpty()) "검색 결과가 없습니다." else "${results.size}개 일정"
+            results.forEach { event ->
+                val score = event.similarity?.let { "유사도 ${"%.2f".format(it)}" }
+                val meta = listOfNotNull(event.startsAt.toLocalDate().format(dateFormatter), score).joinToString("  ·  ")
+                resultList.addView(dialogRow(event.title, meta) {
+                    selectedDate = event.startsAt.toLocalDate()
+                    visibleMonth = YearMonth.from(selectedDate)
+                    dateSelected = true
+                    listExpanded = false
+                    listHidden = false
+                    dialog.dismiss()
+                    showCalendar()
+                }, matchWrap(top = 8))
+            }
+        }
+        searchButton.setOnClickListener {
+            val query = input.text.toString().trim()
+            when {
+                query.isBlank() -> toast("검색어를 입력해 주세요.")
+                searchCalendarIds.isEmpty() -> toast("검색할 달력을 선택해 주세요.")
+                else -> {
+                    resultCaption.text = "검색 중..."
+                    resultList.removeAllViews()
                     background(
-                        work = { CalendarApi.searchEvents(visibleCalendars().map { it.id }, query, currentUser.id, NativeStore.searchMaxDistance(this)) },
-                        done = { showSearchResults(it) },
+                        work = { CalendarApi.searchEvents(searchCalendarIds.toList(), query, currentUser.id, NativeStore.searchMaxDistance(this)) },
+                        done = { renderResults(it) },
                     )
                 }
             }
-            .show()
+        }
+        dialog.show()
     }
 
     private fun showSearchResults(results: List<EventItem>) {
@@ -1330,25 +1380,86 @@ class MainActivity : Activity() {
         content.addView(TextView(this).text("설정").size(20).bold().apply {
             setTextColor(slate900)
         }, matchWrap())
-        content.addView(TextView(this).text("달력과 검색 설정").size(12).apply {
+        content.addView(TextView(this).text("표시할 달력과 기본 등록 달력을 한 번에 정합니다.").size(12).apply {
             setTextColor(slate600)
         }, matchWrap(top = 4))
         val dialog = AlertDialog.Builder(this)
-            .setView(content)
+            .setView(ScrollView(this).apply { addView(content) })
             .setNegativeButton("닫기", null)
             .create()
+        val checkedIds = visibleCalendars().map { it.id }.toMutableSet()
+        var defaultId = selectedCalendarId ?: calendars.firstOrNull()?.id
+        val radioButtons = mutableListOf<RadioButton>()
+        content.addView(TextView(this).text("내 달력").size(13).bold().apply {
+            setTextColor(slate900)
+        }, matchWrap(top = 14))
+        calendars.forEach { calendar ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(Color.WHITE, 12.dp(), 0xFFE2E8F0.toInt())
+                setPadding(10.dp(), 8.dp(), 10.dp(), 8.dp())
+                setOnLongClickListener {
+                    copyInviteCode(calendar)
+                    true
+                }
+            }
+            val check = CheckBox(this).apply {
+                isChecked = calendar.id in checkedIds
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) checkedIds.add(calendar.id) else checkedIds.remove(calendar.id)
+                }
+            }
+            val texts = LinearLayout(this).vertical()
+            texts.addView(TextView(this).text(calendar.name).size(15).bold().apply {
+                setTextColor(slate900)
+                maxLines = 1
+            }, matchWrap())
+            texts.addView(TextView(this).text("길게 누르면 초대코드 복사").size(11).apply {
+                setTextColor(slate600)
+            }, matchWrap(top = 2))
+            val radio = RadioButton(this).apply {
+                isChecked = calendar.id == defaultId
+                setOnClickListener {
+                    defaultId = calendar.id
+                    radioButtons.forEach { it.isChecked = false }
+                    isChecked = true
+                    checkedIds.add(calendar.id)
+                    check.isChecked = true
+                }
+            }
+            radioButtons.add(radio)
+            row.addView(check, LinearLayout.LayoutParams(42.dp(), 42.dp()))
+            row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(radio, LinearLayout.LayoutParams(42.dp(), 42.dp()))
+            content.addView(row, matchWrap(top = 8))
+        }
+        content.addView(Button(this).apply {
+            text = "달력 설정 적용"
+            primaryButton()
+            setOnClickListener {
+                if (checkedIds.isEmpty()) {
+                    toast("하나 이상 선택해 주세요.")
+                    return@setOnClickListener
+                }
+                selectedCalendarId = defaultId?.takeIf { id -> calendars.any { it.id == id } }
+                if (selectedCalendarId == null || selectedCalendarId !in checkedIds) selectedCalendarId = checkedIds.first()
+                visibleCalendarIds = checkedIds
+                NativeStore.saveVisibleCalendarIds(this@MainActivity, visibleCalendarIds)
+                NativeStore.saveDefaultCalendarId(this@MainActivity, selectedCalendarId)
+                dialog.dismiss()
+                reloadCalendar()
+            }
+        }, matchWrap(top = 12))
         fun add(title: String, subtitle: String, action: () -> Unit) {
             content.addView(dialogRow(title, subtitle) {
                 dialog.dismiss()
                 action()
             }, matchWrap(top = 8))
         }
-        add("표시 달력 선택", activeCalendarLabel()) { showVisibleCalendarsDialog() }
-        add("기본 등록 달력 선택", calendars.find { it.id == selectedCalendarId }?.name ?: "선택 없음") { showDefaultCalendarDialog() }
-        if (selectedCalendarId != null) add("초대코드 복사", "현재 기본 달력의 초대코드") { copyInviteCode() }
-        add("검색 임계치 설정", NativeStore.searchMaxDistance(this).toString()) { showSearchThresholdDialog() }
-        add("초대코드로 참여", "가족 달력에 참여") { showJoinCalendarDialog(currentUser) }
-        add("새 달력 만들기", "공유할 달력 추가") { showCreateCalendarDialog(currentUser) }
+        add("검색 임계치 설정", NativeStore.searchMaxDistance(this).toString()) { showSearchThresholdDialog(returnToSettings = true) }
+        add("초대코드로 참여", "가족 달력에 참여") { showJoinCalendarDialog(currentUser, returnToSettings = true) }
+        add("새 달력 만들기", "공유할 달력 추가") { showCreateCalendarDialog(currentUser, returnToSettings = true) }
         dialog.show()
     }
 
@@ -1407,12 +1518,16 @@ class MainActivity : Activity() {
             toast("선택된 달력이 없습니다.")
             return
         }
+        copyInviteCode(selected)
+    }
+
+    private fun copyInviteCode(calendar: CalendarItem) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("calendar invite code", selected.inviteCode))
+        clipboard.setPrimaryClip(ClipData.newPlainText("calendar invite code", calendar.inviteCode))
         toast("초대코드를 복사했습니다.")
     }
 
-    private fun showSearchThresholdDialog() {
+    private fun showSearchThresholdDialog(returnToSettings: Boolean = false) {
         val input = dialogInput("0.2").apply {
             setSingleLine(true)
             setText(NativeStore.searchMaxDistance(this@MainActivity).toString())
@@ -1426,9 +1541,9 @@ class MainActivity : Activity() {
             }, matchWrap(top = 4))
             addView(input, matchWrap(top = 14))
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setView(content)
-            .setNegativeButton("취소", null)
+            .setNegativeButton("취소") { _, _ -> if (returnToSettings) showCalendarDialog() }
             .setPositiveButton("저장") { _, _ ->
                 val value = input.text.toString().toDoubleOrNull()
                 if (value == null) {
@@ -1438,18 +1553,20 @@ class MainActivity : Activity() {
                     toast("검색 임계치를 저장했습니다.")
                 }
             }
-            .show()
+            .create()
+        dialog.setOnCancelListener { if (returnToSettings) showCalendarDialog() }
+        dialog.show()
     }
 
-    private fun showCreateCalendarDialog(currentUser: User) {
+    private fun showCreateCalendarDialog(currentUser: User, returnToSettings: Boolean = false) {
         val input = EditText(this).apply {
             hint = "달력 이름"
             setSingleLine(true)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("새 달력 만들기")
             .setView(input)
-            .setNegativeButton("취소", null)
+            .setNegativeButton("취소") { _, _ -> if (returnToSettings) showCalendarDialog() }
             .setPositiveButton("만들기") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isNotBlank()) {
@@ -1465,18 +1582,20 @@ class MainActivity : Activity() {
                     )
                 }
             }
-            .show()
+            .create()
+        dialog.setOnCancelListener { if (returnToSettings) showCalendarDialog() }
+        dialog.show()
     }
 
-    private fun showJoinCalendarDialog(currentUser: User) {
+    private fun showJoinCalendarDialog(currentUser: User, returnToSettings: Boolean = false) {
         val input = EditText(this).apply {
             hint = "초대 코드"
             setSingleLine(true)
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("달력 참여")
             .setView(input)
-            .setNegativeButton("취소", null)
+            .setNegativeButton("취소") { _, _ -> if (returnToSettings) showCalendarDialog() }
             .setPositiveButton("참여") { _, _ ->
                 val inviteCode = input.text.toString().trim()
                 if (inviteCode.isNotBlank()) {
@@ -1492,7 +1611,9 @@ class MainActivity : Activity() {
                     )
                 }
             }
-            .show()
+            .create()
+        dialog.setOnCancelListener { if (returnToSettings) showCalendarDialog() }
+        dialog.show()
     }
 
     private fun activeCalendarLabel(): String {
