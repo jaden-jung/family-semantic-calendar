@@ -356,9 +356,9 @@ private fun EventItem.occursOn(date: LocalDate): Boolean {
     }
 }
 
-private fun lunarMonthDay(date: LocalDate): Pair<Int, Int>? {
+fun lunarMonthDay(date: LocalDate): Pair<Int, Int>? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
     val calendar = ChineseCalendar()
-    calendar.set(date.year, date.monthValue - 1, date.dayOfMonth)
+    calendar.time = java.util.Date.from(date.atStartOfDay(ZoneId.systemDefault()).toInstant())
     return (calendar.get(ChineseCalendar.MONTH) + 1) to calendar.get(ChineseCalendar.DAY_OF_MONTH)
 }

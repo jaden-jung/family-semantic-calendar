@@ -48,6 +48,7 @@ class MainActivity : Activity() {
     private var user: User? = null
     private var visibleMonth: YearMonth = YearMonth.now()
     private var selectedDate: LocalDate = LocalDate.now()
+    private var dateSelected = false
     private var calendars: List<CalendarItem> = emptyList()
     private var members: List<User> = emptyList()
     private var selectedCalendarId: String? = null
@@ -95,7 +96,6 @@ class MainActivity : Activity() {
                         return true
                     }
                     if (gestureAxis == 2) {
-                        moveVerticalViews(dy)
                         return true
                     }
                     if (gestureAxis == -1) return true
@@ -110,10 +110,7 @@ class MainActivity : Activity() {
                         }
                         kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             val expand = dy < 0
-                            if (listExpanded == expand) {
-                                animateGestureReset()
-                                return true
-                            }
+                            if (listExpanded == expand) return true
                             resetGestureTransforms()
                             listExpanded = dy < 0
                             monthTransitionDirection = 0
@@ -299,7 +296,7 @@ class MainActivity : Activity() {
             clipChildren = false
             clipToPadding = false
         }
-        val listTitle = TextView(this).text("${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정").size(18).bold().apply { setTextColor(slate900) }
+        val listTitle = TextView(this).text(if (dateSelected) "${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정" else "날짜를 선택해 주세요").size(18).bold().apply { setTextColor(slate900) }
         val eventList = LinearLayout(this).vertical()
         val listPanel = LinearLayout(this).vertical().apply {
             background = rounded(Color.WHITE, 14.dp(), 0xFFE2E8F0.toInt())
@@ -315,6 +312,7 @@ class MainActivity : Activity() {
         settings.setOnClickListener { showCalendarDialog() }
         today.setOnClickListener {
             selectedDate = LocalDate.now()
+            dateSelected = true
             visibleMonth = YearMonth.now()
             showCalendar()
         }
@@ -485,6 +483,7 @@ class MainActivity : Activity() {
             .withEndAction {
                 monthTransitionDirection = 0
                 visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                dateSelected = false
                 showCalendar()
             }
             .start()
@@ -539,7 +538,7 @@ class MainActivity : Activity() {
             .setNegativeButton("취소", null)
             .setPositiveButton("이동") { _, _ ->
                 visibleMonth = YearMonth.of(yearPicker.value, monthPicker.value)
-                selectedDate = visibleMonth.atDay(1)
+                dateSelected = false
                 showCalendar()
             }
             .show()
@@ -595,12 +594,13 @@ class MainActivity : Activity() {
                 dayEvents = dayEvents,
                 inMonth = date.month == month.month,
                 today = date == LocalDate.now(),
-                selected = date == selectedDate,
+                selected = dateSelected && date == selectedDate,
                 sunday = date.dayOfWeek.value == 7 || holiday != null,
                 saturday = date.dayOfWeek.value == 6,
             )
             cell.setOnClickListener {
                 selectedDate = date
+                dateSelected = true
                 visibleMonth = YearMonth.from(date)
                 showCalendar()
             }
@@ -619,8 +619,8 @@ class MainActivity : Activity() {
         saturday: Boolean,
     ): LinearLayout {
         val cell = LinearLayout(this).vertical()
-        cell.gravity = Gravity.CENTER_HORIZONTAL
-        cell.setPadding(4.dp(), if (listExpanded) 3.dp() else 5.dp(), 4.dp(), 3.dp())
+        cell.gravity = Gravity.START
+        cell.setPadding(3.dp(), if (listExpanded) 3.dp() else 4.dp(), 3.dp(), 2.dp())
         cell.background = rounded(
             fillColor = when {
                 selected -> 0xFFD1FAE5.toInt()
@@ -628,12 +628,13 @@ class MainActivity : Activity() {
                 !inMonth -> 0xFFF1F5F9.toInt()
                 else -> Color.WHITE
             },
-            radius = 8.dp(),
-            strokeColor = if (selected) teal else 0xFFE2E8F0.toInt(),
+            radius = 0,
+            strokeColor = if (selected) teal else 0xFFE5E7EB.toInt(),
             strokeWidth = if (selected) 2.dp() else 1,
         )
 
-        val number = TextView(this).text(date.dayOfMonth.toString()).size(12).bold().center().apply {
+        val number = TextView(this).text(date.dayOfMonth.toString()).size(11).bold().apply {
+            gravity = Gravity.START
             setTextColor(
                 when {
                     sunday || holiday != null -> 0xFFDC2626.toInt()
@@ -666,9 +667,10 @@ class MainActivity : Activity() {
                 cell.addView(dots, matchWrap(top = 2))
             } else {
                 dayEvents.take(3).forEach { event ->
-                    cell.addView(TextView(this).text(event.title.take(8)).size(8).center().apply {
+                    cell.addView(TextView(this).text(event.title.take(8)).size(8).apply {
                         setTextColor(slate900)
                         maxLines = 1
+                        gravity = Gravity.START
                         background = rounded(softCalendarColor(calendarColor(event.calendarId)), 4.dp())
                         setPadding(2.dp(), 0, 2.dp(), 0)
                     }, matchWrap(top = 1))
@@ -680,6 +682,11 @@ class MainActivity : Activity() {
 
     private fun drawEventList(container: LinearLayout, title: TextView) {
         container.removeAllViews()
+        if (!dateSelected) {
+            title.text = "날짜를 선택해 주세요"
+            container.addView(TextView(this).text("날짜를 선택하면 일정이 여기에 표시됩니다.").muted(), matchWrap())
+            return
+        }
         title.text = "${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정"
         val items = eventsForDate(events, selectedDate)
         if (items.isEmpty()) {
@@ -688,7 +695,7 @@ class MainActivity : Activity() {
         }
         items.forEach { event ->
             val endText = event.endsAt?.takeIf { it.toLocalDate() != event.startsAt.toLocalDate() }?.let { " ~ ${it.toLocalDate().format(dateFormatter)}" } ?: ""
-            val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute)
+            val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute).takeIf { event.startsAt.toLocalTime() != LocalTime.MIDNIGHT }
             val owner = ownerName(members, event.createdBy)
             val meta = listOfNotNull(
                 time,
@@ -733,7 +740,7 @@ class MainActivity : Activity() {
             toast("먼저 달력을 만들어 주세요.")
             return
         }
-        var date = event?.startsAt?.toLocalDate() ?: selectedDate
+        var date = event?.startsAt?.toLocalDate() ?: selectedDate.takeIf { dateSelected } ?: LocalDate.now()
         var time = event?.startsAt?.toLocalTime() ?: LocalTime.of(9, 0)
         var endDate = event?.endsAt?.toLocalDate() ?: date
 
@@ -806,8 +813,14 @@ class MainActivity : Activity() {
         val ownerIndex = owners.indexOfFirst { it.id == defaultOwnerId }.let { if (it >= 0) it else 0 }
         ownerSpinner.setSelection(ownerIndex)
 
-        val dateButton = stylePicker(Button(this).apply { text = "날짜 ${date.format(dateFormatter)}" })
+        val dateButton = stylePicker(Button(this).apply { text = "시작일 ${date.format(dateFormatter)}" })
         val timeButton = stylePicker(Button(this).apply { text = "시간 %02d:%02d".format(time.hour, time.minute) })
+        val timeCheck = CheckBox(this).apply {
+            text = "시간 선택"
+            isChecked = event != null && event.startsAt.toLocalTime() != LocalTime.MIDNIGHT
+            setTextColor(slate900)
+        }
+        timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.GONE
         val periodCheck = CheckBox(this).apply {
             text = "기간 일정"
             isChecked = event?.endsAt?.toLocalDate()?.isAfter(date) == true
@@ -892,14 +905,18 @@ class MainActivity : Activity() {
         })
 
         fun refreshButtons() {
-            dateButton.text = "날짜 ${date.format(dateFormatter)}"
+            dateButton.text = "시작일 ${date.format(dateFormatter)}"
             timeButton.text = "시간 %02d:%02d".format(time.hour, time.minute)
             endDateButton.text = "종료일 ${endDate.format(dateFormatter)}"
             endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
+            timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.GONE
             val repeatVisible = repeatCheck.isChecked
             repeatSpinner.visibility = if (repeatVisible) View.VISIBLE else View.GONE
-            intervalSpinner.visibility = if (repeatVisible) View.VISIBLE else View.GONE
-            weekdayRow.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 1) View.VISIBLE else View.GONE
+            intervalSpinner.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition in 0..1) View.VISIBLE else View.GONE
+            weekdayRow.visibility = if (
+                repeatVisible &&
+                (repeatSpinner.selectedItemPosition == 1 || (repeatSpinner.selectedItemPosition == 2 && monthlyModeSpinner.selectedItemPosition == 1))
+            ) View.VISIBLE else View.GONE
             monthlyModeSpinner.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 2) View.VISIBLE else View.GONE
             lunarCheck.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 3) View.VISIBLE else View.GONE
         }
@@ -925,8 +942,13 @@ class MainActivity : Activity() {
             }, time.hour, time.minute, true).show()
         }
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
+        timeCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         repeatCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         repeatSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) = refreshButtons()
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        monthlyModeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) = refreshButtons()
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
         }
@@ -936,9 +958,11 @@ class MainActivity : Activity() {
             textSize = 13f
         }, matchWrap())
         root.addView(section("날짜와 시간") {
-            addView(twoColumnRow(dateButton, timeButton), matchWrap(top = 10))
+            addView(dateButton, matchWrap(top = 10))
             addView(periodCheck, matchWrap(top = 8))
             addView(endDateButton, matchWrap(top = 4))
+            addView(timeCheck, matchWrap(top = 8))
+            addView(timeButton, matchWrap(top = 4))
         }, matchWrap(top = 12))
         root.addView(section("일정 내용") {
             addView(formLabel("제목"), matchWrap(top = 10))
@@ -984,13 +1008,13 @@ class MainActivity : Activity() {
                 }
                 val calendar = calendars[calendarSpinner.selectedItemPosition]
                 val owner = owners[ownerSpinner.selectedItemPosition].id.let { if (it == ALL_OWNER_ID) null else it }
-                val startsAt = LocalDateTime.of(date, time)
+                val startsAt = LocalDateTime.of(date, if (timeCheck.isChecked) time else LocalTime.MIDNIGHT)
                 val endsAt = if (periodCheck.isChecked) LocalDateTime.of(endDate, LocalTime.of(23, 59)) else null
                 val recurrenceRule = if (repeatCheck.isChecked) {
                     buildRecurrenceRule(
                         repeatSpinner.selectedItemPosition,
                         date,
-                        intervalSpinner.selectedItemPosition + 1,
+                        if (repeatSpinner.selectedItemPosition in 0..1) intervalSpinner.selectedItemPosition + 1 else 1,
                         weekdayChecks.mapIndexedNotNull { index, check -> if (check.isChecked) index else null },
                         monthlyModeSpinner.selectedItemPosition,
                         lunarCheck.isChecked,
@@ -1007,6 +1031,7 @@ class MainActivity : Activity() {
                     done = {
                         dialog.dismiss()
                         selectedDate = date
+                        dateSelected = true
                         visibleMonth = YearMonth.from(date)
                         listExpanded = false
                         reloadCalendar()
@@ -1068,8 +1093,8 @@ class MainActivity : Activity() {
                 .put("frequency", "yearly")
                 .put("interval", interval)
                 .put("lunar", lunar)
-                .put("lunarMonth", date.monthValue)
-                .put("lunarDay", date.dayOfMonth)
+                .put("lunarMonth", (if (lunar) lunarMonthDay(date)?.first else null) ?: date.monthValue)
+                .put("lunarDay", (if (lunar) lunarMonthDay(date)?.second else null) ?: date.dayOfMonth)
         }
     }
 
@@ -1114,6 +1139,7 @@ class MainActivity : Activity() {
                 val event = results[index]
                 selectedDate = event.startsAt.toLocalDate()
                 visibleMonth = YearMonth.from(selectedDate)
+                dateSelected = true
                 listExpanded = false
                 showCalendar()
             }
