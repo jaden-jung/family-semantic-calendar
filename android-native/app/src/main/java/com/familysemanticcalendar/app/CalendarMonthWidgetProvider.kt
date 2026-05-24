@@ -96,7 +96,7 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                     date = date,
                     holiday = holiday,
                     dayEvents = dayEvents,
-                    maxRows = if (holiday == null) 7 else 6,
+                    maxRows = if (holiday == null) 3 else 2,
                     dateColor = dateColor,
                     defaultColor = if (currentMonth) Color.rgb(15, 23, 42) else Color.rgb(148, 163, 184),
                 ),
