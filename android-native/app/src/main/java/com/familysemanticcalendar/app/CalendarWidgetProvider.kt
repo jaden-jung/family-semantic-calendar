@@ -14,11 +14,13 @@ class CalendarWidgetProvider : AppWidgetProvider() {
             render(context, appWidgetManager, widgetId, todayTitle(), "불러오는 중...")
         }
         Thread {
-            val user = NativeStore.savedUser(context)
+            val session = NativeStore.savedSession(context)
+            val user = session?.user
             val bodyByWidget = try {
                 if (user == null) {
                     appWidgetIds.associateWith { "앱에서 먼저 로그인해 주세요." }
                 } else {
+                    CalendarApi.accessToken = session!!.accessToken
                     val calendars = CalendarApi.listCalendars(user.id)
                     val members = CalendarApi.listUsers(user.id)
                     val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }

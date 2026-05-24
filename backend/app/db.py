@@ -50,6 +50,25 @@ def init_db() -> None:
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text")
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash text NOT NULL UNIQUE,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                expires_at timestamptz NOT NULL,
+                revoked_at timestamptz
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS sessions_token_hash_idx
+            ON sessions (token_hash)
+            WHERE revoked_at IS NULL
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS calendars (
                 id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                 name text NOT NULL,

@@ -22,14 +22,20 @@ class UserOut(BaseModel):
     display_name: str
 
 
+class AuthOut(BaseModel):
+    user: UserOut
+    access_token: str
+    expires_at: datetime
+
+
 class CalendarCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    owner_user_id: UUID
+    owner_user_id: UUID | None = None
 
 
 class CalendarJoin(BaseModel):
     invite_code: str
-    user_id: UUID
+    user_id: UUID | None = None
 
 
 class CalendarOut(BaseModel):

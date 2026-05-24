@@ -20,6 +20,7 @@ import java.time.ZoneId
 const val API_BASE_URL = "https://desktop-lnu5cl7.tail96fe59.ts.net"
 
 data class User(val id: String, val displayName: String)
+data class AuthSession(val user: User, val accessToken: String)
 data class CalendarItem(val id: String, val name: String, val inviteCode: String)
 data class EventItem(
     val id: String,
@@ -40,6 +41,7 @@ object NativeStore {
     private const val PREFS = "family-calendar-native"
     private const val USER_ID = "user_id"
     private const val DISPLAY_NAME = "display_name"
+    private const val ACCESS_TOKEN = "access_token"
     private const val SEARCH_MAX_DISTANCE = "search_max_distance"
     private const val DEFAULT_CALENDAR_ID = "default_calendar_id"
     private const val VISIBLE_CALENDAR_IDS = "visible_calendar_ids"
@@ -53,11 +55,26 @@ object NativeStore {
             .apply()
     }
 
+    fun saveSession(context: Context, session: AuthSession) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(USER_ID, session.user.id)
+            .putString(DISPLAY_NAME, session.user.displayName)
+            .putString(ACCESS_TOKEN, session.accessToken)
+            .apply()
+    }
+
     fun savedUser(context: Context): User? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val id = prefs.getString(USER_ID, null) ?: return null
         val name = prefs.getString(DISPLAY_NAME, null) ?: return null
         return User(id, name)
+    }
+
+    fun savedSession(context: Context): AuthSession? {
+        val user = savedUser(context) ?: return null
+        val token = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(ACCESS_TOKEN, null) ?: return null
+        return AuthSession(user, token)
     }
 
     fun searchMaxDistance(context: Context): Double {
@@ -119,14 +136,27 @@ fun visibleCalendarsFor(context: Context, calendars: List<CalendarItem>): List<C
 }
 
 object CalendarApi {
+    var accessToken: String? = null
+
     fun listSignInUsers(): List<User> {
         val array = JSONArray(request("GET", "/auth/users"))
         return (0 until array.length()).map { array.getJSONObject(it).toUser() }
     }
 
-    fun signIn(displayName: String): User {
-        val body = JSONObject().put("display_name", displayName).toString()
-        return JSONObject(request("POST", "/auth/sign-in", body)).toUser()
+    fun signIn(displayName: String, password: String): AuthSession {
+        val body = JSONObject()
+            .put("display_name", displayName)
+            .put("password", password)
+            .toString()
+        return JSONObject(request("POST", "/auth/sign-in", body)).toAuthSession()
+    }
+
+    fun createUser(displayName: String, password: String): AuthSession {
+        val body = JSONObject()
+            .put("display_name", displayName)
+            .put("password", password)
+            .toString()
+        return JSONObject(request("POST", "/users", body)).toAuthSession()
     }
 
     fun listCalendars(userId: String): List<CalendarItem> {
@@ -144,7 +174,6 @@ object CalendarApi {
     fun createCalendar(name: String, userId: String): CalendarItem {
         val body = JSONObject()
             .put("name", name)
-            .put("owner_user_id", userId)
             .toString()
         val item = JSONObject(request("POST", "/calendars", body, userId))
         return CalendarItem(
@@ -157,7 +186,6 @@ object CalendarApi {
     fun joinCalendar(inviteCode: String, userId: String): CalendarItem {
         val body = JSONObject()
             .put("invite_code", inviteCode)
-            .put("user_id", userId)
             .toString()
         val item = JSONObject(request("POST", "/calendars/join", body, userId))
         return CalendarItem(
@@ -230,6 +258,15 @@ object CalendarApi {
         displayName = getString("display_name"),
     )
 
+    private fun JSONObject.toAuthSession(): AuthSession {
+        val session = AuthSession(
+            user = getJSONObject("user").toUser(),
+            accessToken = getString("access_token"),
+        )
+        accessToken = session.accessToken
+        return session
+    }
+
     private fun JSONObject.toEvent() = EventItem(
         id = getString("id"),
         calendarId = getString("calendar_id"),
@@ -283,7 +320,7 @@ object CalendarApi {
             connectTimeout = 10000
             readTimeout = 10000
             setRequestProperty("Content-Type", "application/json")
-            if (userId != null) setRequestProperty("X-User-Id", userId)
+            accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
             if (body != null) {
                 doOutput = true
                 outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }

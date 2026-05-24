@@ -90,8 +90,13 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val saved = NativeStore.savedUser(this)
-        if (saved == null) showLogin() else authenticateSavedUser(saved)
+        val saved = NativeStore.savedSession(this)
+        if (saved == null) {
+            showLogin()
+        } else {
+            CalendarApi.accessToken = saved.accessToken
+            enterCalendar(saved.user)
+        }
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -211,6 +216,13 @@ class MainActivity : Activity() {
             background = rounded(Color.WHITE, 10.dp(), strokeColor = borderColor)
             setPadding(14.dp(), 0, 14.dp(), 0)
         }
+        val passwordInput = EditText(this).apply {
+            hint = "비밀번호"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            background = rounded(Color.WHITE, 10.dp(), strokeColor = borderColor)
+            setPadding(14.dp(), 0, 14.dp(), 0)
+        }
         val usersRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START
@@ -220,6 +232,7 @@ class MainActivity : Activity() {
 
         root.addView(title, matchWrap())
         root.addView(nameInput, matchWrap(top = 18))
+        root.addView(passwordInput, matchWrap(top = 10))
         root.addView(usersRow, matchWrap(top = 10))
         root.addView(signInButton, matchWrap(top = 12))
         root.addView(progress, wrapCenter(top = 12))
@@ -232,16 +245,21 @@ class MainActivity : Activity() {
 
         signInButton.setOnClickListener {
             val name = nameInput.text.toString().trim()
+            val password = passwordInput.text.toString()
             if (name.isBlank()) {
                 toast("사용자 이름을 입력해 주세요.")
                 return@setOnClickListener
             }
+            if (password.isBlank()) {
+                toast("비밀번호를 입력해 주세요.")
+                return@setOnClickListener
+            }
             setLoading(true)
             background(
-                work = { CalendarApi.signIn(name) },
-                done = {
-                    user = it
-                    NativeStore.saveUser(this, it)
+                work = { CalendarApi.signIn(name, password) },
+                done = { session ->
+                    user = session.user
+                    NativeStore.saveSession(this, session)
                     refreshWidgets()
                     showCalendar(loading = true)
                     reloadCalendar()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+import hashlib
 import json
+import secrets
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from typing_extensions import Annotated
@@ -11,6 +14,7 @@ from app.db import close_pool, get_conn, init_db, open_pool
 from app.embeddings import EmbeddingProvider, get_embedding_provider
 from app.search_text import build_event_embedding_text, build_query_embedding_text
 from app.schemas import (
+    AuthOut,
     CalendarCreate,
     CalendarJoin,
     CalendarOut,
@@ -34,6 +38,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Family Semantic Calendar API", lifespan=lifespan)
+SESSION_TTL_DAYS = 90
 
 
 def embedding_provider(settings: Annotated[Settings, Depends(get_settings)]) -> EmbeddingProvider:
@@ -50,6 +55,55 @@ def normalize_display_name(value: str) -> str:
 
 def compact_display_name(value: str) -> str:
     return "".join(value.split()).casefold()
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_session(conn, user_id) -> tuple[str, datetime]:
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(UTC) + timedelta(days=SESSION_TTL_DAYS)
+    conn.execute(
+        """
+        INSERT INTO sessions (user_id, token_hash, expires_at)
+        VALUES (%s, %s, %s)
+        """,
+        (user_id, token_hash(token), expires_at),
+    )
+    return token, expires_at
+
+
+def auth_response(conn, user) -> dict:
+    token, expires_at = create_session(conn, user["id"])
+    return {
+        "user": {"id": user["id"], "display_name": user["display_name"]},
+        "access_token": token,
+        "expires_at": expires_at,
+    }
+
+
+def current_user(authorization: Annotated[str | None, Header(alias="Authorization")] = None):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT u.id, u.display_name
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = %s
+              AND s.revoked_at IS NULL
+              AND s.expires_at > now()
+            """,
+            (token_hash(token),),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return row
 
 
 def event_embedding_text_from_payload(payload: EventCreate | EventUpdate) -> str:
@@ -81,12 +135,14 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/users", response_model=UserOut)
+@app.post("/users", response_model=AuthOut)
 def create_user(payload: UserCreate):
     display_name = normalize_display_name(payload.display_name)
     if not display_name:
         raise HTTPException(status_code=422, detail="Display name is required")
-    password = payload.password or display_name
+    password = payload.password.strip()
+    if not password:
+        raise HTTPException(status_code=422, detail="Password is required")
     with get_conn() as conn:
         existing_users = conn.execute(
             "SELECT id, display_name, password_hash FROM users ORDER BY created_at DESC",
@@ -103,8 +159,9 @@ def create_user(payload: UserCreate):
                     """,
                     (password, existing["id"]),
                 ).fetchone()
+                response = auth_response(conn, row)
                 conn.commit()
-                return row
+                return response
             raise HTTPException(status_code=409, detail="Display name already exists")
         row = conn.execute(
             """
@@ -114,27 +171,18 @@ def create_user(payload: UserCreate):
             """,
             (display_name, password),
         ).fetchone()
+        response = auth_response(conn, row)
         conn.commit()
-        return row
+        return response
 
 
-@app.post("/auth/sign-in", response_model=UserOut)
+@app.post("/auth/sign-in", response_model=AuthOut)
 def sign_in(payload: UserSignIn):
     display_name = normalize_display_name(payload.display_name)
-    compact_name = compact_display_name(display_name)
+    password = payload.password.strip()
+    if not password:
+        raise HTTPException(status_code=422, detail="Password is required")
     with get_conn() as conn:
-        if not payload.password:
-            rows = conn.execute(
-                """
-                SELECT id, display_name
-                FROM users
-                ORDER BY created_at DESC
-                """
-            ).fetchall()
-            row = next((user for user in rows if compact_display_name(user["display_name"]) == compact_name), None)
-            if not row:
-                raise HTTPException(status_code=404, detail="User not found")
-            return row
         row = conn.execute(
             """
             SELECT id, display_name
@@ -144,11 +192,13 @@ def sign_in(payload: UserSignIn):
             ORDER BY created_at DESC
             LIMIT 1
             """,
-            (display_name, payload.password),
+            (display_name, password),
         ).fetchone()
         if not row:
             raise HTTPException(status_code=401, detail="Invalid display name or password")
-        return row
+        response = auth_response(conn, row)
+        conn.commit()
+        return response
 
 
 @app.get("/auth/users", response_model=list[UserOut])
@@ -164,11 +214,8 @@ def list_sign_in_users():
 
 
 @app.get("/users", response_model=list[UserOut])
-def list_users(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+def list_users(user: Annotated[dict, Depends(current_user)]):
     with get_conn() as conn:
-        user = conn.execute("SELECT 1 FROM users WHERE id = %s", (x_user_id,)).fetchone()
-        if not user:
-            raise HTTPException(status_code=403, detail="User not found")
         return conn.execute(
             """
             SELECT id, display_name
@@ -179,32 +226,29 @@ def list_users(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
 
 
 @app.post("/calendars", response_model=CalendarOut)
-def create_calendar(payload: CalendarCreate):
+def create_calendar(payload: CalendarCreate, user: Annotated[dict, Depends(current_user)]):
     with get_conn() as conn:
-        user = conn.execute("SELECT 1 FROM users WHERE id = %s", (payload.owner_user_id,)).fetchone()
-        if not user:
-            raise HTTPException(status_code=404, detail="Owner user not found")
         calendar = conn.execute(
             """
             INSERT INTO calendars (name, owner_user_id)
             VALUES (%s, %s)
             RETURNING id, name, invite_code
             """,
-            (payload.name, payload.owner_user_id),
+            (payload.name, user["id"]),
         ).fetchone()
         conn.execute(
             """
             INSERT INTO calendar_members (calendar_id, user_id, role)
             VALUES (%s, %s, 'owner')
             """,
-            (calendar["id"], payload.owner_user_id),
+            (calendar["id"], user["id"]),
         )
         conn.commit()
         return {**calendar, "role": "owner"}
 
 
 @app.post("/calendars/join", response_model=CalendarOut)
-def join_calendar(payload: CalendarJoin):
+def join_calendar(payload: CalendarJoin, user: Annotated[dict, Depends(current_user)]):
     with get_conn() as conn:
         calendar = conn.execute(
             "SELECT id, name, invite_code FROM calendars WHERE invite_code = %s",
@@ -218,14 +262,14 @@ def join_calendar(payload: CalendarJoin):
             VALUES (%s, %s, 'member')
             ON CONFLICT (calendar_id, user_id) DO NOTHING
             """,
-            (calendar["id"], payload.user_id),
+            (calendar["id"], user["id"]),
         )
         conn.commit()
         return {**calendar, "role": "member"}
 
 
 @app.get("/calendars", response_model=list[CalendarOut])
-def list_calendars(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+def list_calendars(user: Annotated[dict, Depends(current_user)]):
     with get_conn() as conn:
         return conn.execute(
             """
@@ -235,13 +279,13 @@ def list_calendars(x_user_id: Annotated[str, Header(alias="X-User-Id")]):
             WHERE cm.user_id = %s
             ORDER BY c.created_at DESC
             """,
-            (x_user_id,),
+            (user["id"],),
         ).fetchall()
 
 
 @app.get("/calendars/{calendar_id}/members", response_model=list[UserOut])
-def list_calendar_members(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
-    assert_member(calendar_id, x_user_id)
+def list_calendar_members(calendar_id: str, user: Annotated[dict, Depends(current_user)]):
+    assert_member(calendar_id, user["id"])
     with get_conn() as conn:
         return conn.execute(
             """
@@ -259,12 +303,11 @@ def list_calendar_members(calendar_id: str, x_user_id: Annotated[str, Header(ali
 def create_event(
     payload: EventCreate,
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
+    user: Annotated[dict, Depends(current_user)],
 ):
-    current_user_id = x_user_id or (str(payload.created_by) if payload.created_by else None)
-    if not current_user_id:
-        raise HTTPException(status_code=400, detail="User id is required")
-    assert_member(payload.calendar_id, current_user_id)
+    assert_member(payload.calendar_id, user["id"])
+    if payload.created_by is not None:
+        assert_member(payload.calendar_id, payload.created_by)
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
@@ -297,7 +340,7 @@ def update_event(
     event_id: str,
     payload: EventUpdate,
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
+    user: Annotated[dict, Depends(current_user)],
 ):
     with get_conn() as conn:
         existing = conn.execute(
@@ -306,10 +349,9 @@ def update_event(
         ).fetchone()
     if not existing:
         raise HTTPException(status_code=404, detail="Event not found")
-    current_user_id = x_user_id or (str(payload.created_by) if payload.created_by else None)
-    if not current_user_id:
-        raise HTTPException(status_code=400, detail="User id is required")
-    assert_member(existing["calendar_id"], current_user_id)
+    assert_member(existing["calendar_id"], user["id"])
+    if payload.created_by is not None:
+        assert_member(existing["calendar_id"], payload.created_by)
 
     searchable_text = event_embedding_text_from_payload(payload)
     embedding = vector_literal(provider.embed(searchable_text))
@@ -346,7 +388,7 @@ def update_event(
 
 
 @app.delete("/events/{event_id}")
-def delete_event(event_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
+def delete_event(event_id: str, user: Annotated[dict, Depends(current_user)]):
     with get_conn() as conn:
         existing = conn.execute(
             "SELECT calendar_id FROM events WHERE id = %s",
@@ -354,15 +396,15 @@ def delete_event(event_id: str, x_user_id: Annotated[str, Header(alias="X-User-I
         ).fetchone()
         if not existing:
             raise HTTPException(status_code=404, detail="Event not found")
-        assert_member(existing["calendar_id"], x_user_id)
+        assert_member(existing["calendar_id"], user["id"])
         conn.execute("DELETE FROM events WHERE id = %s", (event_id,))
         conn.commit()
         return {"status": "deleted"}
 
 
 @app.get("/events", response_model=list[EventOut])
-def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User-Id")]):
-    assert_member(calendar_id, x_user_id)
+def list_events(calendar_id: str, user: Annotated[dict, Depends(current_user)]):
+    assert_member(calendar_id, user["id"])
     with get_conn() as conn:
         return conn.execute(
             """
@@ -380,13 +422,13 @@ def list_events(calendar_id: str, x_user_id: Annotated[str, Header(alias="X-User
 def search_events(
     payload: SearchQuery,
     provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
-    x_user_id: Annotated[str, Header(alias="X-User-Id")],
+    user: Annotated[dict, Depends(current_user)],
 ):
     calendar_ids = payload.calendar_ids or ([payload.calendar_id] if payload.calendar_id else [])
     if not calendar_ids:
         raise HTTPException(status_code=400, detail="calendar_id is required")
     for calendar_id in calendar_ids:
-        assert_member(calendar_id, x_user_id)
+        assert_member(calendar_id, user["id"])
     query_embedding = vector_literal(provider.embed(build_query_embedding_text(payload.query)))
     with get_conn() as conn:
         rows = conn.execute(
@@ -417,7 +459,10 @@ def search_events(
 
 
 @app.post("/admin/reembed")
-def reembed_all_events(provider: Annotated[EmbeddingProvider, Depends(embedding_provider)]):
+def reembed_all_events(
+    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
+    user: Annotated[dict, Depends(current_user)],
+):
     with get_conn() as conn:
         rows = conn.execute(
             """

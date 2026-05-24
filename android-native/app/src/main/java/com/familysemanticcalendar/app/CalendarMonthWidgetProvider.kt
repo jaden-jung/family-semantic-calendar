@@ -21,11 +21,13 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
             render(context, appWidgetManager, widgetId, monthTitle(), emptyList(), isLoading = true)
         }
         Thread {
-            val user = NativeStore.savedUser(context)
+            val session = NativeStore.savedSession(context)
+            val user = session?.user
             val result = try {
                 if (user == null) {
                     WidgetMonthData(emptyList(), "로그인이 필요합니다")
                 } else {
+                    CalendarApi.accessToken = session!!.accessToken
                     val calendars = CalendarApi.listCalendars(user.id)
                     val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
                     WidgetMonthData(events, null)
