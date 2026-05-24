@@ -108,7 +108,13 @@ class MainActivity : Activity() {
                         return true
                     }
                     if (gestureAxis == 2 && resizeGestureAllowed) {
-                        moveVerticalViews(dy)
+                        if (kotlin.math.abs(dy) > 28.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) && applyVerticalListMode(dy)) {
+                            resetGestureTransforms()
+                            monthTransitionDirection = 0
+                            resizeGestureAllowed = false
+                            gestureAxis = -1
+                            showCalendar()
+                        }
                         return true
                     }
                     if (gestureAxis == -1 && resizeGestureAllowed) return true
@@ -121,7 +127,7 @@ class MainActivity : Activity() {
                             animateMonthDragCommit(if (dx < 0) 1 else -1)
                             return true
                         }
-                        resizeGestureAllowed && kotlin.math.abs(dy) > 34.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
+                        resizeGestureAllowed && kotlin.math.abs(dy) > 28.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             if (!applyVerticalListMode(dy)) return true
                             resetGestureTransforms()
                             monthTransitionDirection = 0
@@ -460,17 +466,6 @@ class MainActivity : Activity() {
         nextMonthView?.translationX = dx + width
     }
 
-    private fun moveVerticalViews(dy: Float) {
-        val progress = (kotlin.math.abs(dy) / 220.dp()).coerceAtMost(1f)
-        val calendarScale = if (dy < 0) 1f - progress * 0.08f else 0.92f + progress * 0.08f
-        currentMonthView?.pivotY = 0f
-        currentMonthView?.scaleY = calendarScale
-        activeSwipeViews.drop(1).forEach { view ->
-            view.translationY = dy * 0.28f
-            view.alpha = 1f - progress * 0.08f
-        }
-    }
-
     private fun canMoveVertical(dy: Float): Boolean {
         return (dy < 0 && !listExpanded) || (dy > 0 && !listHidden)
     }
@@ -721,24 +716,15 @@ class MainActivity : Activity() {
 
         val dayEvents = eventsForDate(events, date)
         val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
-        val visibleActiveMultiDayEvents = activeMultiDayEvents.filter { shouldShowMultiDayInCell(it, date) }
-        val lastActiveSlot = visibleActiveMultiDayEvents
+        val lastActiveSlot = activeMultiDayEvents
             .mapNotNull { slotByEventId[it.id] }
             .maxOrNull() ?: -1
         val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
-        visibleActiveMultiDayEvents.forEach { event ->
+        activeMultiDayEvents.forEach { event ->
             val slot = slotByEventId[event.id]
             if (slot != null && slot in slots.indices) slots[slot] = event
         }
         return slots + dayEvents.filterNot { it.isMultiDay() }
-    }
-
-    private fun shouldShowMultiDayInCell(event: EventItem, date: LocalDate): Boolean {
-        val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
-        val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
-        val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
-        if (segmentOffset == 0) return true
-        return event.title.drop(segmentOffset * 7).length > 2
     }
 
     private fun replaceCalendarCell(date: LocalDate) {
@@ -796,7 +782,7 @@ class MainActivity : Activity() {
                 }
             )
         }
-        cell.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 12.dp()))
+        cell.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 14.dp()))
 
         if (realEvents.isNotEmpty() || (!listExpanded && holiday != null)) {
             if (listExpanded) {
@@ -819,7 +805,8 @@ class MainActivity : Activity() {
                     if (holiday != null) add(CellRow(null, holiday))
                     dayEvents.forEach { add(CellRow(it)) }
                 }
-                rows.take(3).forEachIndexed { index, row ->
+                val maxRows = ((calendarCellHeight() - 19) / 12).coerceIn(1, 6)
+                rows.take(maxRows).forEachIndexed { index, row ->
                     if (row.holidayText != null || row.event == null) {
                         cell.addView(TextView(this).text(row.holidayText ?: " ").size(8).apply {
                             setTextColor(0xFFDC2626.toInt())
@@ -835,7 +822,7 @@ class MainActivity : Activity() {
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
                     val rowCount = realEvents.size + if (holiday == null) 0 else 1
-                    val moreText = if (index == 2 && rowCount > 3) " ..." else ""
+                    val moreText = if (index == maxRows - 1 && rowCount > maxRows) " ..." else ""
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
                     val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
@@ -843,7 +830,8 @@ class MainActivity : Activity() {
                         !multiDay -> "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText"
                         else -> {
                             val chunk = event.title.drop(segmentOffset * 7).take(7)
-                            if (segmentOffset > 0 && chunk.length <= 2) " " else chunk.ifBlank { " " }
+                            val visibleTitle = if (segmentOffset > 0 && chunk.length <= 2) event.title.take(7) else chunk.ifBlank { event.title.take(7) }
+                            "$visibleTitle$moreText"
                         }
                     }
                     cell.addView(TextView(this).text(title).size(8).apply {

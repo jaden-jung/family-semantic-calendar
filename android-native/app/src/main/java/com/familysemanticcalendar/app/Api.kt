@@ -253,10 +253,10 @@ object CalendarApi {
 
     private fun parseDateTime(value: String): LocalDateTime {
         return try {
-            Instant.parse(value).atZone(ZoneId.systemDefault()).toLocalDateTime()
+            OffsetDateTime.parse(value).toLocalDateTime()
         } catch (_: Exception) {
             try {
-                OffsetDateTime.parse(value).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
+                Instant.parse(value).atZone(ZoneId.systemDefault()).toLocalDateTime()
             } catch (_: Exception) {
                 LocalDateTime.parse(value)
             }
