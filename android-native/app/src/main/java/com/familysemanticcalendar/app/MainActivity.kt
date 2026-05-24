@@ -63,6 +63,8 @@ class MainActivity : Activity() {
     private var currentMonthView: View? = null
     private var previousMonthView: View? = null
     private var nextMonthView: View? = null
+    private var currentEventList: LinearLayout? = null
+    private var currentListTitle: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -353,6 +355,8 @@ class MainActivity : Activity() {
         drawCalendar(nextGrid, visibleMonth.plusMonths(1))
         drawCalendar(calendarGrid, visibleMonth)
         drawEventList(eventList, listTitle)
+        currentEventList = eventList
+        currentListTitle = listTitle
         activeSwipeViews = listOf(calendarGrid, listPanel)
         currentMonthView = calendarGrid
         previousMonthView = previousGrid
@@ -465,9 +469,12 @@ class MainActivity : Activity() {
         if (current == null || incoming == null) {
             monthTransitionDirection = direction
             visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+            dateSelected = false
             showCalendar()
             return
         }
+        dateSelected = false
+        refreshCurrentEventList()
         val width = resources.displayMetrics.widthPixels.toFloat()
         current.animate()
             .translationX(if (direction > 0) -width else width)
@@ -483,18 +490,9 @@ class MainActivity : Activity() {
             .withEndAction {
                 monthTransitionDirection = 0
                 visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
-                dateSelected = false
                 showCalendar()
             }
             .start()
-        activeSwipeViews.drop(1).forEach { view ->
-            view.animate()
-                .translationX(if (direction > 0) -width * 0.24f else width * 0.24f)
-                .alpha(0.45f)
-                .setDuration(150L)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
-        }
     }
 
     private fun playListResizeTransition() {
@@ -608,6 +606,12 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun refreshCurrentEventList() {
+        val list = currentEventList ?: return
+        val title = currentListTitle ?: return
+        drawEventList(list, title)
+    }
+
     private fun dayCell(
         date: LocalDate,
         holiday: String?,
@@ -620,7 +624,7 @@ class MainActivity : Activity() {
     ): LinearLayout {
         val cell = LinearLayout(this).vertical()
         cell.gravity = Gravity.START
-        cell.setPadding(3.dp(), if (listExpanded) 3.dp() else 4.dp(), 3.dp(), 2.dp())
+        cell.setPadding(0, if (listExpanded) 3.dp() else 4.dp(), 0, 2.dp())
         cell.background = rounded(
             fillColor = when {
                 selected -> 0xFFD1FAE5.toInt()
@@ -635,6 +639,7 @@ class MainActivity : Activity() {
 
         val number = TextView(this).text(date.dayOfMonth.toString()).size(11).bold().apply {
             gravity = Gravity.START
+            setPadding(3.dp(), 0, 3.dp(), 0)
             setTextColor(
                 when {
                     sunday || holiday != null -> 0xFFDC2626.toInt()
@@ -646,8 +651,10 @@ class MainActivity : Activity() {
         }
         cell.addView(number, matchWrap())
 
-        if (holiday != null && !listExpanded) {
-            cell.addView(TextView(this).text(holiday.take(4)).size(9).center().apply { setTextColor(0xFFDC2626.toInt()) }, matchWrap())
+        if (!listExpanded) {
+            cell.addView(TextView(this).text(holiday?.take(4) ?: " ").size(9).center().apply {
+                setTextColor(0xFFDC2626.toInt())
+            }, matchWrap())
         }
 
         if (dayEvents.isNotEmpty()) {
@@ -667,12 +674,15 @@ class MainActivity : Activity() {
                 cell.addView(dots, matchWrap(top = 2))
             } else {
                 dayEvents.take(3).forEach { event ->
-                    cell.addView(TextView(this).text(event.title.take(8)).size(8).apply {
+                    val multiDay = event.isMultiDay()
+                    val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
+                    val title = if (!multiDay || segmentStart) event.title.take(8) else " "
+                    cell.addView(TextView(this).text(title).size(8).apply {
                         setTextColor(slate900)
                         maxLines = 1
                         gravity = Gravity.START
-                        background = rounded(softCalendarColor(calendarColor(event.calendarId)), 4.dp())
-                        setPadding(2.dp(), 0, 2.dp(), 0)
+                        background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
+                        setPadding(3.dp(), 0, 3.dp(), 0)
                     }, matchWrap(top = 1))
                 }
             }

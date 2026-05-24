@@ -287,7 +287,18 @@ object CalendarApi {
 }
 
 fun eventsForDate(events: List<EventItem>, date: LocalDate): List<EventItem> {
-    return events.filter { it.occursOn(date) }.sortedBy { it.startsAt.toLocalTime() }
+    return events.filter { it.occursOn(date) }
+        .sortedWith(
+            compareByDescending<EventItem> { it.isMultiDay() }
+                .thenBy { it.startsAt.toLocalDate() }
+                .thenBy { it.startsAt.toLocalTime() }
+                .thenBy { it.title }
+        )
+}
+
+fun EventItem.isMultiDay(): Boolean {
+    val endDate = endsAt?.toLocalDate() ?: return false
+    return endDate.isAfter(startsAt.toLocalDate())
 }
 
 fun ownerName(members: List<User>, ownerId: String?): String {
