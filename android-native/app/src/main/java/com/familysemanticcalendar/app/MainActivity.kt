@@ -75,8 +75,10 @@ class MainActivity : Activity() {
     private var currentMonthOverlay: MultiDayTitleOverlay? = null
     private var previousMonthOverlay: MultiDayTitleOverlay? = null
     private var nextMonthOverlay: MultiDayTitleOverlay? = null
+    private var currentMonthTitle: TextView? = null
     private var currentEventList: LinearLayout? = null
     private var currentListTitle: TextView? = null
+    private var currentListPanel: View? = null
     private var resizeAreaTop = -1
     private var resizeAreaBottom = -1
     private var resizeGestureAllowed = false
@@ -397,8 +399,10 @@ class MainActivity : Activity() {
         drawCalendar(nextGrid, visibleMonth.plusMonths(1))
         drawCalendar(calendarGrid, visibleMonth)
         drawEventList(eventList, listTitle)
+        currentMonthTitle = monthTitle
         currentEventList = eventList
         currentListTitle = listTitle
+        currentListPanel = listPanel
         activeSwipeViews = listOf(calendarPage, listPanel)
         currentCalendarGrid = calendarGrid
         previousCalendarGrid = previousGrid
@@ -582,6 +586,7 @@ class MainActivity : Activity() {
             .withEndAction {
                 monthTransitionDirection = 0
                 visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                rotateMonthPages(direction)
                 redrawMonthPages()
             }
             .start()
@@ -703,6 +708,7 @@ class MainActivity : Activity() {
         multiDaySlotCache.clear()
         val previousMonth = visibleMonth.minusMonths(1)
         val nextMonth = visibleMonth.plusMonths(1)
+        currentMonthTitle?.text = visibleMonth.format(monthFormatter)
         previousMonthOverlay?.setMonth(previousMonth)
         currentMonthOverlay?.setMonth(visibleMonth)
         nextMonthOverlay?.setMonth(nextMonth)
@@ -710,7 +716,50 @@ class MainActivity : Activity() {
         drawCalendar(currentGrid, visibleMonth)
         drawCalendar(nextGrid, nextMonth)
         refreshCurrentEventList()
-        resetGestureTransforms()
+        currentMonthView?.apply {
+            translationX = 0f
+            translationY = 0f
+            scaleY = 1f
+            alpha = 1f
+        }
+        previousMonthView?.alpha = 1f
+        nextMonthView?.alpha = 1f
+        prepareAdjacentMonthViews()
+    }
+
+    private fun rotateMonthPages(direction: Int) {
+        val oldCurrentView = currentMonthView
+        val oldPreviousView = previousMonthView
+        val oldNextView = nextMonthView
+        val oldCurrentGrid = currentCalendarGrid
+        val oldPreviousGrid = previousCalendarGrid
+        val oldNextGrid = nextCalendarGrid
+        val oldCurrentOverlay = currentMonthOverlay
+        val oldPreviousOverlay = previousMonthOverlay
+        val oldNextOverlay = nextMonthOverlay
+
+        if (direction > 0) {
+            previousMonthView = oldCurrentView
+            currentMonthView = oldNextView
+            nextMonthView = oldPreviousView
+            previousCalendarGrid = oldCurrentGrid
+            currentCalendarGrid = oldNextGrid
+            nextCalendarGrid = oldPreviousGrid
+            previousMonthOverlay = oldCurrentOverlay
+            currentMonthOverlay = oldNextOverlay
+            nextMonthOverlay = oldPreviousOverlay
+        } else {
+            previousMonthView = oldNextView
+            currentMonthView = oldPreviousView
+            nextMonthView = oldCurrentView
+            previousCalendarGrid = oldNextGrid
+            currentCalendarGrid = oldPreviousGrid
+            nextCalendarGrid = oldCurrentGrid
+            previousMonthOverlay = oldNextOverlay
+            currentMonthOverlay = oldPreviousOverlay
+            nextMonthOverlay = oldCurrentOverlay
+        }
+        currentMonthView?.let { activeSwipeViews = listOfNotNull(it, currentListPanel) }
     }
 
     private fun selectCalendarDate(date: LocalDate) {
