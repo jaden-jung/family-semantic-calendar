@@ -456,7 +456,7 @@ class MainActivity : Activity() {
     }
 
     private fun prepareAdjacentMonthViews() {
-        val width = resources.displayMetrics.widthPixels.toFloat()
+        val width = monthDragWidth()
         previousMonthView?.translationX = -width
         nextMonthView?.translationX = width
         previousMonthView?.alpha = 1f
@@ -464,10 +464,15 @@ class MainActivity : Activity() {
     }
 
     private fun moveMonthViews(dx: Float) {
-        val width = resources.displayMetrics.widthPixels.toFloat()
+        val width = monthDragWidth()
         currentMonthView?.translationX = dx
         previousMonthView?.translationX = dx - width
         nextMonthView?.translationX = dx + width
+    }
+
+    private fun monthDragWidth(): Float {
+        val parentWidth = (currentMonthView?.parent as? View)?.width ?: currentMonthView?.width ?: 0
+        return parentWidth.takeIf { it > 0 }?.toFloat() ?: resources.displayMetrics.widthPixels.toFloat()
     }
 
     private fun canMoveVertical(dy: Float): Boolean {
@@ -525,12 +530,12 @@ class MainActivity : Activity() {
                 .start()
         }
         previousMonthView?.animate()
-            ?.translationX(-resources.displayMetrics.widthPixels.toFloat())
+            ?.translationX(-monthDragWidth())
             ?.setDuration(160L)
             ?.setInterpolator(DecelerateInterpolator())
             ?.start()
         nextMonthView?.animate()
-            ?.translationX(resources.displayMetrics.widthPixels.toFloat())
+            ?.translationX(monthDragWidth())
             ?.setDuration(160L)
             ?.setInterpolator(DecelerateInterpolator())
             ?.start()
@@ -548,7 +553,7 @@ class MainActivity : Activity() {
         }
         dateSelected = false
         refreshCurrentEventList()
-        val width = resources.displayMetrics.widthPixels.toFloat()
+        val width = monthDragWidth()
         current.animate()
             .translationX(if (direction > 0) -width else width)
             .alpha(0.92f)
@@ -662,6 +667,13 @@ class MainActivity : Activity() {
         val previousDate = selectedDate.takeIf { dateSelected }
         selectedDate = date
         dateSelected = true
+        if (listHidden) {
+            listHidden = false
+            listExpanded = false
+            monthTransitionDirection = 0
+            showCalendar()
+            return
+        }
         val targetMonth = YearMonth.from(date)
         if (targetMonth == visibleMonth) {
             previousDate?.let { replaceCalendarCell(it) }
@@ -852,10 +864,11 @@ class MainActivity : Activity() {
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
                     val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
+                    val titleChunkSize = 5
                     val title = when {
                         !multiDay -> event.title.take(8)
                         else -> {
-                            val visibleTitle = if (segmentStart) event.title.take(9) else ""
+                            val visibleTitle = event.title.drop(segmentOffset * titleChunkSize).take(titleChunkSize)
                             visibleTitle
                         }
                     }
