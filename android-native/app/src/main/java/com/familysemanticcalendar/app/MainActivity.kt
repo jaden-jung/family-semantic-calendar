@@ -1,5 +1,8 @@
 package com.familysemanticcalendar.app
 
+import android.animation.ValueAnimator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.DatePickerDialog
@@ -572,24 +575,31 @@ class MainActivity : Activity() {
         dateSelected = false
         refreshCurrentEventList()
         val width = monthDragWidth()
-        current.animate()
-            .translationX(if (direction > 0) -width else width)
-            .alpha(0.92f)
-            .setDuration(150L)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-        incoming.animate()
-            .translationX(0f)
-            .alpha(1f)
-            .setDuration(150L)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                monthTransitionDirection = 0
-                visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
-                rotateMonthPages(direction)
-                redrawAdjacentMonthPages()
+        val currentStart = current.translationX
+        val incomingStart = incoming.translationX
+        val currentEnd = if (direction > 0) -width else width
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 170L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { animator ->
+                val progress = animator.animatedValue as Float
+                current.translationX = currentStart + (currentEnd - currentStart) * progress
+                incoming.translationX = incomingStart * (1f - progress)
+                current.alpha = 1f
+                incoming.alpha = 1f
             }
-            .start()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    current.translationX = currentEnd
+                    incoming.translationX = 0f
+                    monthTransitionDirection = 0
+                    visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
+                    rotateMonthPages(direction)
+                    redrawAdjacentMonthPages()
+                }
+            })
+            start()
+        }
     }
 
     private fun playListResizeTransition() {
