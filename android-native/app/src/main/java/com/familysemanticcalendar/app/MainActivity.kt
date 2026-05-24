@@ -58,6 +58,7 @@ class MainActivity : Activity() {
     private var swipeStartX = 0f
     private var swipeStartY = 0f
     private var listExpanded = false
+    private var listHidden = false
     private var monthTransitionDirection = 0
     private var gestureAxis = 0
     private var activeSwipeViews: List<View> = emptyList()
@@ -112,10 +113,8 @@ class MainActivity : Activity() {
                             return true
                         }
                         kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
-                            val expand = dy < 0
-                            if (listExpanded == expand) return true
+                            if (!applyVerticalListMode(dy)) return true
                             resetGestureTransforms()
-                            listExpanded = dy < 0
                             monthTransitionDirection = 0
                             showCalendar()
                             playListResizeTransition()
@@ -304,6 +303,7 @@ class MainActivity : Activity() {
         val listPanel = LinearLayout(this).vertical().apply {
             background = rounded(Color.WHITE, 14.dp(), 0xFFE2E8F0.toInt())
             setPadding(14.dp(), 12.dp(), 14.dp(), 14.dp())
+            visibility = if (listHidden) View.GONE else View.VISIBLE
         }
         val listHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -381,7 +381,11 @@ class MainActivity : Activity() {
         return (header + 6 * cell + rowMargins + gridPadding).dp()
     }
 
-    private fun calendarCellHeight(): Int = if (listExpanded) 36 else 66
+    private fun calendarCellHeight(): Int = when {
+        listHidden -> 78
+        listExpanded -> 36
+        else -> 66
+    }
 
     private fun playMonthTransition(vararg views: View) {
         val direction = monthTransitionDirection
@@ -429,7 +433,36 @@ class MainActivity : Activity() {
     }
 
     private fun canMoveVertical(dy: Float): Boolean {
-        return (dy < 0 && !listExpanded) || (dy > 0 && listExpanded)
+        return (dy < 0 && !listExpanded) || (dy > 0 && !listHidden)
+    }
+
+    private fun applyVerticalListMode(dy: Float): Boolean {
+        return if (dy < 0) {
+            when {
+                listHidden -> {
+                    listHidden = false
+                    listExpanded = false
+                    true
+                }
+                !listExpanded -> {
+                    listExpanded = true
+                    true
+                }
+                else -> false
+            }
+        } else {
+            when {
+                listExpanded -> {
+                    listExpanded = false
+                    true
+                }
+                !listHidden -> {
+                    listHidden = true
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     private fun resetGestureTransforms() {
@@ -741,14 +774,13 @@ class MainActivity : Activity() {
             return
         }
         items.forEach { event ->
-            val endText = event.endsAt?.takeIf { it.toLocalDate() != event.startsAt.toLocalDate() }?.let { " ~ ${it.toLocalDate().format(dateFormatter)}" } ?: ""
             val time = "%02d:%02d".format(event.startsAt.hour, event.startsAt.minute).takeIf { event.startsAt.toLocalTime() != LocalTime.MIDNIGHT }
+            val rangeText = eventRangeText(event)
             val owner = ownerName(members, event.createdBy)
             val meta = listOfNotNull(
-                time,
+                rangeText ?: time,
                 event.location.takeIf { it.isNotBlank() },
                 owner.takeIf { it.isNotBlank() }?.let { "[$it]" },
-                endText.takeIf { it.isNotBlank() },
             ).joinToString("  ")
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -779,6 +811,17 @@ class MainActivity : Activity() {
             row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             container.addView(row, matchWrap(top = 6))
         }
+    }
+
+    private fun eventRangeText(event: EventItem): String? {
+        val end = event.endsAt ?: return null
+        if (!event.isMultiDay()) return null
+        val hasTime = event.startsAt.toLocalTime() != LocalTime.MIDNIGHT || end.toLocalTime() != LocalTime.of(23, 59)
+        fun format(value: LocalDateTime): String {
+            val dateText = value.toLocalDate().format(dateFormatter)
+            return if (hasTime) "$dateText %02d:%02d".format(value.hour, value.minute) else dateText
+        }
+        return "${format(event.startsAt)} ~ ${format(end)}"
     }
 
     private fun showEventDialog(event: EventItem? = null) {
@@ -1098,6 +1141,7 @@ class MainActivity : Activity() {
                         dateSelected = true
                         visibleMonth = YearMonth.from(date)
                         listExpanded = false
+                        listHidden = false
                         reloadCalendar()
                     },
                 )
@@ -1205,6 +1249,7 @@ class MainActivity : Activity() {
                 visibleMonth = YearMonth.from(selectedDate)
                 dateSelected = true
                 listExpanded = false
+                listHidden = false
                 showCalendar()
             }
             .setNegativeButton("닫기", null)
@@ -1377,7 +1422,7 @@ class MainActivity : Activity() {
     private fun activeCalendarLabel(): String {
         if (calendars.isEmpty()) return "참여 중인 달력이 없습니다."
         val visible = visibleCalendars()
-        if (visible.size > 1) return "${visible.size}개 달력 표시 중"
+        if (visible.size > 1) return visible.joinToString(" · ") { it.name }
         val selected = calendars.find { it.id == selectedCalendarId }
         return selected?.name ?: "${calendars.size}개 달력"
     }
