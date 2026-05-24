@@ -43,6 +43,7 @@ object NativeStore {
     private const val SEARCH_MAX_DISTANCE = "search_max_distance"
     private const val DEFAULT_CALENDAR_ID = "default_calendar_id"
     private const val VISIBLE_CALENDAR_IDS = "visible_calendar_ids"
+    private const val OWNER_COLOR_PREFIX = "owner_color_"
 
     fun saveUser(context: Context, user: User) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -95,6 +96,19 @@ object NativeStore {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .putString(VISIBLE_CALENDAR_IDS, calendarIds.joinToString("|"))
+            .apply()
+    }
+
+    fun ownerColor(context: Context, ownerId: String): Int? {
+        val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt("$OWNER_COLOR_PREFIX$ownerId", Int.MIN_VALUE)
+        return value.takeIf { it != Int.MIN_VALUE }
+    }
+
+    fun saveOwnerColor(context: Context, ownerId: String, color: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putInt("$OWNER_COLOR_PREFIX$ownerId", color)
             .apply()
     }
 }

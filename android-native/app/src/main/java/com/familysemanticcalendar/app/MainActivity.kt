@@ -938,7 +938,7 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                 }
-                realEvents.map { ownerColor(it.createdBy) }.distinct().take(4).forEach { color ->
+                realEvents.map { ownerAccentColor(it.createdBy) }.distinct().take(4).forEach { color ->
                     dots.addView(View(this).apply {
                         background = rounded(color, 999.dp())
                     }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
@@ -1019,9 +1019,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
-            if (!multiDay) {
+            if (!multiDay || segmentStart) {
                 addView(View(this@MainActivity).apply {
-                    background = rounded(ownerColor(event.createdBy), 3.dp())
+                    background = rounded(ownerAccentColor(event.createdBy), if (multiDay) 0 else 3.dp())
                 }, LinearLayout.LayoutParams(3.dp(), LinearLayout.LayoutParams.MATCH_PARENT))
             }
             addView(TextView(this@MainActivity).text(title).size(textSize).apply {
@@ -1029,9 +1029,14 @@ class MainActivity : Activity() {
                 maxLines = 1
                 includeFontPadding = false
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(if (!multiDay) 2.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
+                setPadding(if (!multiDay || segmentStart) 2.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
+    }
+
+    private fun ownerAccentColor(ownerId: String?): Int {
+        if (ownerId == null || ownerId == ALL_OWNER_ID) return 0xFF64748B.toInt()
+        return NativeStore.ownerColor(this, ownerId) ?: ownerColor(ownerId)
     }
 
     private inner class MultiDayTitleOverlay(context: Context, private var month: YearMonth) : View(context) {
@@ -1039,7 +1044,6 @@ class MainActivity : Activity() {
             color = slate900
             textSize = 8f * resources.displayMetrics.scaledDensity
         }
-        private val ownerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         init {
             isClickable = false
@@ -1078,10 +1082,6 @@ class MainActivity : Activity() {
                     val right = (endCol + 1) * cellWidth - 4.dp()
                     val top = headerHeight + row * cellHeight + eventTopOffset + slot * rowHeight
                     val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
-                    if (label.isNotBlank()) {
-                        ownerPaint.color = ownerColor(event.createdBy)
-                        canvas.drawRect(left, top, left + 3.dp(), top + childHeight, ownerPaint)
-                    }
                     if (label.isBlank()) return@forEach
                     val save = canvas.save()
                     canvas.clipRect(left + 5.dp(), top, right, top + childHeight)
@@ -1121,7 +1121,7 @@ class MainActivity : Activity() {
                 setOnClickListener { showEventDialog(event) }
             }
             row.addView(View(this).apply {
-                background = rounded(ownerColor(event.createdBy), 4.dp())
+                background = rounded(ownerAccentColor(event.createdBy), 4.dp())
             }, LinearLayout.LayoutParams(5.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
                 rightMargin = 10.dp()
             })
@@ -1825,12 +1825,53 @@ class MainActivity : Activity() {
                 action()
             }, matchWrap(top = 8))
         }
+        add("내 일정 색상", "달력 일정 앞쪽에 표시되는 내 색상") { showMyOwnerColorDialog(returnToSettings = true) }
         add("검색 임계치 설정", NativeStore.searchMaxDistance(this).toString()) { showSearchThresholdDialog(returnToSettings = true) }
         add("초대코드로 참여", "가족 달력에 참여") { showJoinCalendarDialog(currentUser, returnToSettings = true) }
         add("새 달력 만들기", "공유할 달력 추가") { showCreateCalendarDialog(currentUser, returnToSettings = true) }
         dialog.show()
     }
-
+    private fun showMyOwnerColorDialog(returnToSettings: Boolean = false) {
+        val currentUser = user ?: return
+        val content = LinearLayout(this).vertical().apply {
+            setPadding(18.dp(), 10.dp(), 18.dp(), 4.dp())
+        }
+        content.addView(TextView(this).text("${currentUser.displayName} 일정 색상").size(16).bold().apply {
+            setTextColor(slate900)
+        }, matchWrap())
+        val selected = NativeStore.ownerColor(this, currentUser.id) ?: ownerColor(currentUser.id)
+        val dialog = AlertDialog.Builder(this)
+            .setView(content)
+            .setNegativeButton("취소") { _, _ -> if (returnToSettings) showCalendarDialog() }
+            .create()
+        ownerPalette.chunked(4).forEach { rowColors ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+            }
+            rowColors.forEach { color ->
+                row.addView(TextView(this).text(if (color == selected) "✓" else "").center().apply {
+                    textSize = 18f
+                    setTextColor(Color.WHITE)
+                    setTypeface(typeface, Typeface.BOLD)
+                    background = rounded(color, 999.dp(), if (color == selected) slate900 else Color.TRANSPARENT, if (color == selected) 2.dp() else 0)
+                    setOnClickListener {
+                        NativeStore.saveOwnerColor(this@MainActivity, currentUser.id, color)
+                        dialog.dismiss()
+                        showCalendar()
+                        if (returnToSettings) showCalendarDialog()
+                    }
+                }, LinearLayout.LayoutParams(44.dp(), 44.dp()).apply {
+                    leftMargin = 6.dp()
+                    rightMargin = 6.dp()
+                    topMargin = 12.dp()
+                })
+            }
+            content.addView(row, matchWrap())
+        }
+        dialog.setOnCancelListener { if (returnToSettings) showCalendarDialog() }
+        dialog.show()
+    }
     private fun showVisibleCalendarsDialog() {
         if (calendars.isEmpty()) {
             toast("참여 중인 달력이 없습니다.")
