@@ -1019,9 +1019,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
-            if (!multiDay || segmentStart) {
+            if (!multiDay) {
                 addView(View(this@MainActivity).apply {
-                    background = rounded(ownerColor(event.createdBy), if (multiDay) 0 else 3.dp())
+                    background = rounded(ownerColor(event.createdBy), 3.dp())
                 }, LinearLayout.LayoutParams(3.dp(), LinearLayout.LayoutParams.MATCH_PARENT))
             }
             addView(TextView(this@MainActivity).text(title).size(textSize).apply {
@@ -1029,7 +1029,7 @@ class MainActivity : Activity() {
                 maxLines = 1
                 includeFontPadding = false
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(if (!multiDay || segmentStart) 2.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
+                setPadding(if (!multiDay) 2.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
         }
     }
@@ -1116,18 +1116,13 @@ class MainActivity : Activity() {
             ).joinToString("  ")
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
-                background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
-                setPadding(12.dp(), 10.dp(), 12.dp(), 10.dp())
+                background = rounded(softCalendarColor(calendarColor(event.calendarId)), 10.dp(), 0xFFE2E8F0.toInt())
+                setPadding(0, 10.dp(), 12.dp(), 10.dp())
                 setOnClickListener { showEventDialog(event) }
             }
             row.addView(View(this).apply {
-                background = rounded(calendarColor(event.calendarId), 999.dp())
+                background = rounded(ownerColor(event.createdBy), 4.dp())
             }, LinearLayout.LayoutParams(5.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
-                rightMargin = 4.dp()
-            })
-            row.addView(View(this).apply {
-                background = rounded(ownerColor(event.createdBy), 999.dp())
-            }, LinearLayout.LayoutParams(4.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
                 rightMargin = 10.dp()
             })
             val texts = LinearLayout(this).vertical()
