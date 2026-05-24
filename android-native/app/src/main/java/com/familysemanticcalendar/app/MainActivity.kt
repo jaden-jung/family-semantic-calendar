@@ -431,7 +431,7 @@ class MainActivity : Activity() {
         val density = resources.displayMetrics.density
         val reservedPx = systemBarTopPadding() +
             systemBarBottomPadding() +
-            10.dp() + 40.dp() + 4.dp() + 34.dp() + 10.dp() + 32.dp() + 8.dp()
+            10.dp() + 40.dp() + 4.dp() + 34.dp() + 10.dp() + 32.dp() + 8.dp() + 72.dp()
         val cellPx = ((resources.displayMetrics.heightPixels - reservedPx) / 6).coerceAtLeast(78.dp())
         return (cellPx / density).toInt()
     }
