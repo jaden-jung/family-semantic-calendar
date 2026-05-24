@@ -21,6 +21,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -119,7 +120,7 @@ class MainActivity : Activity() {
                             animateMonthDragCommit(if (dx < 0) 1 else -1)
                             return true
                         }
-                        resizeGestureAllowed && kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
+                        resizeGestureAllowed && kotlin.math.abs(dy) > 34.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             if (!applyVerticalListMode(dy)) return true
                             resetGestureTransforms()
                             monthTransitionDirection = 0
@@ -750,9 +751,10 @@ class MainActivity : Activity() {
         cell.addView(number, matchWrap())
 
         if (!listExpanded) {
-            cell.addView(TextView(this).text(holiday?.take(4) ?: " ").size(9).center().apply {
+            cell.addView(TextView(this).text(holiday?.take(4) ?: " ").size(8).center().apply {
                 setTextColor(0xFFDC2626.toInt())
-            }, matchWrap())
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 10.dp()))
         }
 
         if (dayEvents.isNotEmpty()) {
@@ -775,8 +777,14 @@ class MainActivity : Activity() {
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
                     val moreText = if (index == 2 && dayEvents.size > 3) " ..." else ""
-                    val title = if (!multiDay || segmentStart) "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText" else " "
-                    cell.addView(TextView(this).text(title).size(7).apply {
+                    val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
+                    val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
+                    val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
+                    val title = when {
+                        !multiDay -> "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText"
+                        else -> event.title.drop(segmentOffset * 7).take(7).ifBlank { " " }
+                    }
+                    cell.addView(TextView(this).text(title).size(8).apply {
                         setTextColor(slate900)
                         maxLines = 1
                         includeFontPadding = false
@@ -1298,24 +1306,33 @@ class MainActivity : Activity() {
         val resultCaption = TextView(this).text("검색어를 입력하고 조회하세요.").size(12).apply {
             setTextColor(slate600)
         }
+        val calendarLabel = TextView(this).text(calendarLabel(searchCalendarIds)).size(14).muted().apply {
+            background = rounded(0xFFEFF6FF.toInt(), 999.dp())
+            setPadding(12.dp(), 8.dp(), 12.dp(), 8.dp())
+        }
         val content = dialogPanel()
         content.addView(TextView(this).text("일정 검색").size(20).bold().apply {
             setTextColor(slate900)
         }, matchWrap())
-        content.addView(TextView(this).text("검색할 달력").size(12).apply {
-            setTextColor(slate600)
-        }, matchWrap(top = 10))
-        calendars.forEach { calendar ->
-            content.addView(CheckBox(this).apply {
-                text = calendar.name
-                isChecked = calendar.id in searchCalendarIds
-                setTextColor(slate900)
-                setOnCheckedChangeListener { _, checked ->
-                    if (checked) searchCalendarIds.add(calendar.id) else searchCalendarIds.remove(calendar.id)
+        content.addView(calendarLabel, matchWrap(top = 10))
+        calendarLabel.setOnClickListener {
+            val checked = calendars.map { it.id in searchCalendarIds }.toBooleanArray()
+            AlertDialog.Builder(this)
+                .setTitle("검색할 달력")
+                .setMultiChoiceItems(calendars.map { it.name }.toTypedArray(), checked) { _, which, isChecked ->
+                    checked[which] = isChecked
                 }
-            }, matchWrap(top = 2))
+                .setNegativeButton("취소", null)
+                .setPositiveButton("적용") { _, _ ->
+                    searchCalendarIds.clear()
+                    searchCalendarIds.addAll(calendars.filterIndexed { index, _ -> checked[index] }.map { it.id })
+                    calendarLabel.text = calendarLabel(searchCalendarIds)
+                }
+                .show()
         }
-        content.addView(input, matchWrap(top = 12))
+        content.addView(input, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 58.dp()).apply {
+            topMargin = 14.dp()
+        })
         val searchButton = Button(this).apply {
             text = "검색"
             primaryButton()
@@ -1350,6 +1367,7 @@ class MainActivity : Activity() {
                 query.isBlank() -> toast("검색어를 입력해 주세요.")
                 searchCalendarIds.isEmpty() -> toast("검색할 달력을 선택해 주세요.")
                 else -> {
+                    hideKeyboard(input)
                     resultCaption.text = "검색 중..."
                     resultList.removeAllViews()
                     background(
@@ -1360,6 +1378,10 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
+        input.post {
+            input.requestFocus()
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     private fun showSearchResults(results: List<EventItem>) {
@@ -1396,6 +1418,20 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
+    private fun calendarLabel(calendarIds: Set<String>): String {
+        val selected = calendars.filter { it.id in calendarIds }
+        return when {
+            selected.isEmpty() -> "검색할 달력 선택"
+            selected.size == 1 -> selected.first().name
+            else -> selected.joinToString(" · ") { it.name }
+        }
+    }
+
+    private fun hideKeyboard(view: View) {
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+            .hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
     private fun showCalendarDialog() {
         val currentUser = user ?: return
         val content = dialogPanel()
@@ -1412,8 +1448,23 @@ class MainActivity : Activity() {
         val checkedIds = visibleCalendars().map { it.id }.toMutableSet()
         var defaultId = selectedCalendarId ?: calendars.firstOrNull()?.id
         val radioButtons = mutableListOf<RadioButton>()
-        content.addView(TextView(this).text("내 달력").size(13).bold().apply {
-            setTextColor(slate900)
+        fun persistCalendarSelection() {
+            selectedCalendarId = defaultId?.takeIf { id -> calendars.any { it.id == id } }
+            if (selectedCalendarId == null || selectedCalendarId !in checkedIds) selectedCalendarId = checkedIds.firstOrNull()
+            visibleCalendarIds = checkedIds
+            NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
+            NativeStore.saveDefaultCalendarId(this, selectedCalendarId)
+            reloadCalendar()
+        }
+        content.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).text("내 달력").size(13).bold().apply {
+                setTextColor(slate900)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@MainActivity).text("길게 누르면 초대코드 복사").size(11).apply {
+                setTextColor(slate600)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }, matchWrap(top = 14))
         calendars.forEach { calendar ->
             val row = LinearLayout(this).apply {
@@ -1429,7 +1480,20 @@ class MainActivity : Activity() {
             val check = CheckBox(this).apply {
                 isChecked = calendar.id in checkedIds
                 setOnCheckedChangeListener { _, checked ->
-                    if (checked) checkedIds.add(calendar.id) else checkedIds.remove(calendar.id)
+                    if (checked) {
+                        checkedIds.add(calendar.id)
+                    } else if (checkedIds.size <= 1) {
+                        isChecked = true
+                        toast("하나 이상 선택해 주세요.")
+                        return@setOnCheckedChangeListener
+                    } else {
+                        checkedIds.remove(calendar.id)
+                        if (defaultId == calendar.id) {
+                            defaultId = checkedIds.first()
+                            radioButtons.forEach { it.isChecked = false }
+                        }
+                    }
+                    persistCalendarSelection()
                 }
             }
             val texts = LinearLayout(this).vertical()
@@ -1437,9 +1501,6 @@ class MainActivity : Activity() {
                 setTextColor(slate900)
                 maxLines = 1
             }, matchWrap())
-            texts.addView(TextView(this).text("길게 누르면 초대코드 복사").size(11).apply {
-                setTextColor(slate600)
-            }, matchWrap(top = 2))
             val radio = RadioButton(this).apply {
                 isChecked = calendar.id == defaultId
                 setOnClickListener {
@@ -1448,6 +1509,7 @@ class MainActivity : Activity() {
                     isChecked = true
                     checkedIds.add(calendar.id)
                     check.isChecked = true
+                    persistCalendarSelection()
                 }
             }
             radioButtons.add(radio)
@@ -1456,23 +1518,6 @@ class MainActivity : Activity() {
             row.addView(radio, LinearLayout.LayoutParams(42.dp(), 42.dp()))
             content.addView(row, matchWrap(top = 8))
         }
-        content.addView(Button(this).apply {
-            text = "달력 설정 적용"
-            primaryButton()
-            setOnClickListener {
-                if (checkedIds.isEmpty()) {
-                    toast("하나 이상 선택해 주세요.")
-                    return@setOnClickListener
-                }
-                selectedCalendarId = defaultId?.takeIf { id -> calendars.any { it.id == id } }
-                if (selectedCalendarId == null || selectedCalendarId !in checkedIds) selectedCalendarId = checkedIds.first()
-                visibleCalendarIds = checkedIds
-                NativeStore.saveVisibleCalendarIds(this@MainActivity, visibleCalendarIds)
-                NativeStore.saveDefaultCalendarId(this@MainActivity, selectedCalendarId)
-                dialog.dismiss()
-                reloadCalendar()
-            }
-        }, matchWrap(top = 12))
         fun add(title: String, subtitle: String, action: () -> Unit) {
             content.addView(dialogRow(title, subtitle) {
                 dialog.dismiss()
