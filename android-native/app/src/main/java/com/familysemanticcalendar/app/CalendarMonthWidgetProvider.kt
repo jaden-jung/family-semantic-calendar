@@ -5,11 +5,12 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.BackgroundColorSpan
-import android.text.style.ForegroundColorSpan
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.widget.RemoteViews
 import java.time.LocalDate
 import java.time.YearMonth
@@ -23,7 +24,7 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
             val user = NativeStore.savedUser(context)
             val result = try {
                 if (user == null) {
-                    WidgetMonthData(emptyList(), "앱에서 로그인 필요")
+                    WidgetMonthData(emptyList(), "로그인이 필요합니다")
                 } else {
                     val calendars = CalendarApi.listCalendars(user.id)
                     val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
@@ -54,144 +55,187 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
     ) {
         val intent = Intent(context, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(context, 1, intent, PendingIntent.FLAG_IMMUTABLE)
+        val bitmap = drawMonthBitmap(if (isLoading) "$title 불러오는 중" else title, events, status)
         val views = RemoteViews(context.packageName, R.layout.widget_month).apply {
-            setTextViewText(R.id.monthWidgetTitle, if (isLoading) "$title 불러오는 중" else title)
+            setImageViewBitmap(R.id.monthWidgetImage, bitmap)
             setOnClickPendingIntent(R.id.monthWidgetRoot, pendingIntent)
-            fillMonthCells(this, events, isLoading, status, pendingIntent)
+            setOnClickPendingIntent(R.id.monthWidgetImage, pendingIntent)
         }
         manager.updateAppWidget(widgetId, views)
     }
 
-    private fun fillMonthCells(
-        views: RemoteViews,
-        events: List<EventItem>,
-        isLoading: Boolean,
-        status: String?,
-        pendingIntent: PendingIntent,
-    ) {
+    private fun drawMonthBitmap(title: String, events: List<EventItem>, status: String?): Bitmap {
+        val width = 900
+        val height = 1320
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
         val month = YearMonth.now()
         val first = month.atDay(1)
         val start = first.minusDays((first.dayOfWeek.value % 7).toLong())
         val today = LocalDate.now()
-        val eventCache = mutableMapOf<LocalDate, List<EventItem?>>()
-        val slotCache = mutableMapOf<LocalDate, Map<String, Int>>()
+        val titlePaint = textPaint(Color.rgb(15, 118, 110), 38f, bold = true)
+        val weekdayPaint = textPaint(Color.rgb(100, 116, 139), 28f, bold = true).apply { textAlign = Paint.Align.CENTER }
+        val datePaint = textPaint(Color.rgb(15, 23, 42), 24f, bold = false)
+        val holidayPaint = textPaint(Color.rgb(220, 38, 38), 23f, bold = false)
+        val eventPaint = textPaint(Color.rgb(15, 23, 42), 22f, bold = false)
+        val hiddenPaint = textPaint(Color.rgb(71, 85, 105), 22f, bold = true)
+        val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(148, 163, 184)
+            strokeWidth = 2.2f
+            style = Paint.Style.STROKE
+        }
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
-        cellIds.forEachIndexed { index, cellId ->
-            val date = start.plusDays(index.toLong())
-            val dayEvents = if (isLoading) emptyList() else widgetEventsForDate(events, date, eventCache, slotCache)
-            val holiday = holidayName(date)
-            val currentMonth = date.month == month.month
-            val sunday = date.dayOfWeek.value == 7
-            val saturday = date.dayOfWeek.value == 6
-            val dateColor = when {
-                !currentMonth -> Color.rgb(148, 163, 184)
-                holiday != null || sunday -> Color.rgb(220, 38, 38)
-                saturday -> Color.rgb(37, 99, 235)
-                else -> Color.rgb(15, 23, 42)
+        canvas.drawColor(Color.TRANSPARENT)
+        canvas.drawText(title, 0f, 44f, titlePaint)
+
+        val weekdayTop = 70f
+        val gridTop = 112f
+        val cellWidth = width / 7f
+        val cellHeight = (height - gridTop) / 6f
+        val weekdays = listOf("일", "월", "화", "수", "목", "금", "토")
+        weekdays.forEachIndexed { index, label ->
+            weekdayPaint.color = when (index) {
+                0 -> Color.rgb(220, 38, 38)
+                6 -> Color.rgb(37, 99, 235)
+                else -> Color.rgb(100, 116, 139)
             }
+            canvas.drawText(label, cellWidth * index + cellWidth / 2f, weekdayTop + 27f, weekdayPaint)
+        }
 
-            views.setTextViewText(
-                cellId,
-                widgetCellText(
-                    date = date,
-                    holiday = holiday,
-                    dayEvents = dayEvents,
-                    maxRows = if (holiday == null) 3 else 2,
-                    dateColor = dateColor,
-                    defaultColor = if (currentMonth) Color.rgb(15, 23, 42) else Color.rgb(148, 163, 184),
-                ),
-            )
-            views.setTextColor(cellId, if (currentMonth) Color.rgb(15, 23, 42) else Color.rgb(148, 163, 184))
-            views.setInt(
-                cellId,
-                "setBackgroundColor",
-                when {
+        repeat(6) { row ->
+            repeat(7) { col ->
+                val date = start.plusDays((row * 7 + col).toLong())
+                val left = col * cellWidth
+                val top = gridTop + row * cellHeight
+                fillPaint.color = when {
                     date == today -> Color.rgb(204, 251, 241)
-                    !currentMonth -> Color.rgb(248, 250, 252)
+                    date.month != month.month -> Color.rgb(248, 250, 252)
                     else -> Color.WHITE
-                },
-            )
-            views.setOnClickPendingIntent(cellId, pendingIntent)
+                }
+                canvas.drawRect(left, top, left + cellWidth, top + cellHeight, fillPaint)
+            }
+        }
+
+        drawWeekEvents(canvas, events, start, month, gridTop, cellWidth, cellHeight, eventPaint, hiddenPaint, fillPaint)
+
+        repeat(7) { col ->
+            val x = col * cellWidth
+            canvas.drawLine(x, gridTop, x, height.toFloat(), linePaint)
+        }
+        canvas.drawLine(width.toFloat(), gridTop, width.toFloat(), height.toFloat(), linePaint)
+        repeat(7) { row ->
+            val y = gridTop + row * cellHeight
+            canvas.drawLine(0f, y, width.toFloat(), y, linePaint)
+        }
+
+        repeat(6) { row ->
+            repeat(7) { col ->
+                val date = start.plusDays((row * 7 + col).toLong())
+                val left = col * cellWidth
+                val top = gridTop + row * cellHeight
+                val holiday = holidayName(date)
+                val currentMonth = date.month == month.month
+                datePaint.color = when {
+                    !currentMonth -> Color.rgb(148, 163, 184)
+                    holiday != null || date.dayOfWeek.value == 7 -> Color.rgb(220, 38, 38)
+                    date.dayOfWeek.value == 6 -> Color.rgb(37, 99, 235)
+                    else -> Color.rgb(15, 23, 42)
+                }
+                canvas.drawText(date.dayOfMonth.toString(), left + 7f, top + 28f, datePaint)
+                if (holiday != null) {
+                    canvas.drawText(ellipsize(holiday, holidayPaint, cellWidth - 12f), left + 7f, top + 56f, holidayPaint)
+                }
+            }
         }
 
         if (status != null) {
-            views.setTextViewText(R.id.mw_d0, status)
-            views.setTextColor(R.id.mw_d0, Color.rgb(71, 85, 105))
-            views.setInt(R.id.mw_d0, "setBackgroundColor", Color.rgb(248, 250, 252))
+            fillPaint.color = Color.argb(220, 248, 250, 252)
+            canvas.drawRect(0f, gridTop, cellWidth, gridTop + cellHeight, fillPaint)
+            canvas.drawText(status, 8f, gridTop + 58f, hiddenPaint)
         }
+        return bitmap
     }
 
-    private fun widgetCellText(
-        date: LocalDate,
-        holiday: String?,
-        dayEvents: List<EventItem?>,
-        maxRows: Int,
-        dateColor: Int,
-        defaultColor: Int,
-    ): SpannableString {
-        val realEvents = dayEvents.filterNotNull()
-        val visibleEvents = if (realEvents.size > maxRows) {
-            dayEvents.take((maxRows - 1).coerceAtLeast(0))
-        } else {
-            dayEvents.take(maxRows)
-        }
-        val hiddenCount = (realEvents.size - visibleEvents.filterNotNull().size).coerceAtLeast(0)
-        val lines = mutableListOf<WidgetLine>()
-        lines.add(WidgetLine(date.dayOfMonth.toString(), dateColor, null))
-        if (holiday != null) lines.add(WidgetLine(holiday, Color.rgb(220, 38, 38), null))
-        visibleEvents.forEach { event ->
-            if (event == null) {
-                lines.add(WidgetLine(" ", defaultColor, null))
-            } else {
-                val multiDay = event.isMultiDay()
-                val text = if (multiDay) {
-                    val segmentStart = event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7
-                    if (segmentStart) event.title.take(8) else "━━━━━━"
-                } else {
-                    event.title.take(8)
-                }
-                lines.add(WidgetLine(text, defaultColor, softColor(calendarColor(event.calendarId))))
-            }
-        }
-        if (hiddenCount > 0) lines.add(WidgetLine("+$hiddenCount", Color.rgb(71, 85, 105), null))
-
-        val raw = lines.joinToString("\n") { it.text }
-        val spannable = SpannableString(raw)
-        var offset = 0
-        lines.forEach { line ->
-            val end = offset + line.text.length
-            if (end > offset) {
-                spannable.setSpan(ForegroundColorSpan(line.color), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                if (line.backgroundColor != null && line.text.isNotBlank()) {
-                    spannable.setSpan(BackgroundColorSpan(line.backgroundColor), offset, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-            }
-            offset = end + 1
-        }
-        return spannable
-    }
-
-    private fun widgetEventsForDate(
+    private fun drawWeekEvents(
+        canvas: Canvas,
         events: List<EventItem>,
-        date: LocalDate,
-        eventCache: MutableMap<LocalDate, List<EventItem?>>,
-        slotCache: MutableMap<LocalDate, Map<String, Int>>,
-    ): List<EventItem?> {
-        eventCache[date]?.let { return it }
-        val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
-        val slotByEventId = slotCache.getOrPut(weekStart) { widgetMultiDaySlotsForWeek(events, weekStart) }
-        val dayEvents = eventsForDate(events, date)
-        val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
-        val lastActiveSlot = activeMultiDayEvents.mapNotNull { slotByEventId[it.id] }.maxOrNull() ?: -1
-        val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
-        activeMultiDayEvents.forEach { event ->
-            val slot = slotByEventId[event.id]
-            if (slot != null && slot in slots.indices) slots[slot] = event
+        monthStart: LocalDate,
+        month: YearMonth,
+        gridTop: Float,
+        cellWidth: Float,
+        cellHeight: Float,
+        eventPaint: Paint,
+        hiddenPaint: Paint,
+        fillPaint: Paint,
+    ) {
+        repeat(6) { row ->
+            val weekStart = monthStart.plusDays((row * 7).toLong())
+            val slotByEventId = widgetMultiDaySlotsForWeek(events, weekStart)
+            val weekEvents = (0..6).map { day -> eventsForDate(events, weekStart.plusDays(day.toLong())) }
+            val eventTop = gridTop + row * cellHeight + 65f
+            val eventHeight = 24f
+            val eventGap = 4f
+            val capacity = ((cellHeight - 72f) / (eventHeight + eventGap)).toInt().coerceAtLeast(1)
+            val visibleByDay = IntArray(7)
+
+            slotByEventId.entries.sortedBy { it.value }.forEach { (eventId, slot) ->
+                if (slot >= capacity) return@forEach
+                val event = events.firstOrNull { it.id == eventId } ?: return@forEach
+                val eventStart = event.startsAt.toLocalDate()
+                val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
+                val segmentStart = maxOf(eventStart, weekStart)
+                val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
+                val startCol = segmentStart.dayOfWeek.value % 7
+                val endCol = segmentEnd.dayOfWeek.value % 7
+                val top = eventTop + slot * (eventHeight + eventGap)
+                val left = startCol * cellWidth + 4f
+                val right = (endCol + 1) * cellWidth - 4f
+                drawEventPill(canvas, left, top, right, top + eventHeight, softColor(calendarColor(event.calendarId)), fillPaint)
+                val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
+                if (label.isNotBlank()) {
+                    canvas.drawText(ellipsize(label, eventPaint, right - left - 10f), left + 5f, top + 18f, eventPaint)
+                }
+                for (day in startCol..endCol) visibleByDay[day] += 1
+            }
+
+            repeat(7) { day ->
+                val date = weekStart.plusDays(day.toLong())
+                val dayEvents = weekEvents[day]
+                val singleDayEvents = dayEvents.filterNot { it.isMultiDay() }.toMutableList()
+                val slots = MutableList<EventItem?>(capacity) { null }
+                dayEvents.filter { it.isMultiDay() }.forEach { event ->
+                    val slot = slotByEventId[event.id]
+                    if (slot != null && slot in 0 until capacity) slots[slot] = event
+                }
+                slots.indices.forEach { index ->
+                    if (slots[index] == null && singleDayEvents.isNotEmpty()) {
+                        val event = singleDayEvents.removeAt(0)
+                        val left = day * cellWidth + 4f
+                        val top = eventTop + index * (eventHeight + eventGap)
+                        val right = (day + 1) * cellWidth - 4f
+                        drawEventPill(canvas, left, top, right, top + eventHeight, softColor(calendarColor(event.calendarId)), fillPaint)
+                        canvas.drawText(ellipsize(event.title, eventPaint, right - left - 8f), left + 5f, top + 18f, eventPaint)
+                        visibleByDay[day] += 1
+                    }
+                }
+                val hiddenCount = (dayEvents.size - visibleByDay[day]).coerceAtLeast(0)
+                if (hiddenCount > 0) {
+                    val top = eventTop + (capacity - 1) * (eventHeight + eventGap)
+                    canvas.drawText("+$hiddenCount", day * cellWidth + 8f, top + 19f, hiddenPaint)
+                }
+                if (date.month != month.month) {
+                    eventPaint.color = Color.rgb(148, 163, 184)
+                } else {
+                    eventPaint.color = Color.rgb(15, 23, 42)
+                }
+            }
         }
-        val singleDayEvents = dayEvents.filterNot { it.isMultiDay() }.toMutableList()
-        return (slots.map { it ?: singleDayEvents.removeFirstOrNull() } + singleDayEvents).also {
-            eventCache[date] = it
-        }
+    }
+
+    private fun drawEventPill(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float, color: Int, paint: Paint) {
+        paint.color = color
+        canvas.drawRoundRect(RectF(left, top, right, bottom), 3f, 3f, paint)
     }
 
     private fun widgetMultiDaySlotsForWeek(events: List<EventItem>, weekStart: LocalDate): Map<String, Int> {
@@ -219,6 +263,23 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
         return slotByEventId
     }
 
+    private fun ellipsize(text: String, paint: Paint, maxWidth: Float): String {
+        if (paint.measureText(text) <= maxWidth) return text
+        var result = text
+        while (result.isNotEmpty() && paint.measureText(result) > maxWidth) {
+            result = result.dropLast(1)
+        }
+        return result
+    }
+
+    private fun textPaint(color: Int, size: Float, bold: Boolean): Paint {
+        return Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            textSize = size
+            typeface = Typeface.create(Typeface.DEFAULT, if (bold) Typeface.BOLD else Typeface.NORMAL)
+        }
+    }
+
     private fun softColor(color: Int): Int {
         val red = Color.red(color)
         val green = Color.green(color)
@@ -244,16 +305,7 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
             0xFFBE123C.toInt(),
             0xFF15803D.toInt(),
         )
-        val cellIds = intArrayOf(
-            R.id.mw_d0, R.id.mw_d1, R.id.mw_d2, R.id.mw_d3, R.id.mw_d4, R.id.mw_d5, R.id.mw_d6,
-            R.id.mw_d7, R.id.mw_d8, R.id.mw_d9, R.id.mw_d10, R.id.mw_d11, R.id.mw_d12, R.id.mw_d13,
-            R.id.mw_d14, R.id.mw_d15, R.id.mw_d16, R.id.mw_d17, R.id.mw_d18, R.id.mw_d19, R.id.mw_d20,
-            R.id.mw_d21, R.id.mw_d22, R.id.mw_d23, R.id.mw_d24, R.id.mw_d25, R.id.mw_d26, R.id.mw_d27,
-            R.id.mw_d28, R.id.mw_d29, R.id.mw_d30, R.id.mw_d31, R.id.mw_d32, R.id.mw_d33, R.id.mw_d34,
-            R.id.mw_d35, R.id.mw_d36, R.id.mw_d37, R.id.mw_d38, R.id.mw_d39, R.id.mw_d40, R.id.mw_d41,
-        )
     }
 
     private data class WidgetMonthData(val events: List<EventItem>, val status: String?)
-    private data class WidgetLine(val text: String, val color: Int, val backgroundColor: Int?)
 }
