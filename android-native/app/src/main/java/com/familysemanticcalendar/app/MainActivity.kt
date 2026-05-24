@@ -833,13 +833,9 @@ class MainActivity : Activity() {
             }
 
             val availableEventHeight = (calendarCellHeight() - topPaddingDp - bottomPaddingDp - numberHeightDp - holidayHeightDp).coerceAtLeast(normalRowHeightDp)
-            val rowHeightDp = if (listHidden && realEvents.isNotEmpty()) {
-                (availableEventHeight / realEvents.size).coerceIn(8, normalRowHeightDp)
-            } else {
-                normalRowHeightDp
-            }
+            val rowHeightDp = normalRowHeightDp
             val childHeightDp = (rowHeightDp - 1).coerceAtLeast(7)
-            val eventTextSize = if (rowHeightDp <= 9) 7 else 8
+            val eventTextSize = 8
             val eventRows = (availableEventHeight / rowHeightDp).coerceIn(1, 10)
             val visibleEvents = if (realEvents.size > eventRows) dayEvents.take((eventRows - 1).coerceAtLeast(0)) else dayEvents.take(eventRows)
             val hiddenEventCount = (realEvents.size - visibleEvents.filterNotNull().size).coerceAtLeast(0)
