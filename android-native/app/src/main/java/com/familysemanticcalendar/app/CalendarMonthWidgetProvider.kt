@@ -146,7 +146,7 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                 val multiDay = event.isMultiDay()
                 val text = if (multiDay) {
                     val segmentStart = event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7
-                    if (segmentStart) event.title.take(8) else " "
+                    if (segmentStart) event.title.take(8) else "━━━━━━"
                 } else {
                     event.title.take(8)
                 }
