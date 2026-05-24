@@ -743,25 +743,22 @@ class MainActivity : Activity() {
         var date = event?.startsAt?.toLocalDate() ?: selectedDate.takeIf { dateSelected } ?: LocalDate.now()
         var time = event?.startsAt?.toLocalTime() ?: LocalTime.of(9, 0)
         var endDate = event?.endsAt?.toLocalDate() ?: date
+        var endTime = event?.endsAt?.toLocalTime() ?: time
 
         val root = LinearLayout(this).vertical().apply {
             setPadding(18.dp(), 6.dp(), 18.dp(), 10.dp())
             setBackgroundColor(screenBg)
         }
-        fun formLabel(value: String) = TextView(this).text(value).bold().apply {
-            setTextColor(slate600)
-            textSize = 12f
-        }
         fun styleInput(input: EditText): EditText = input.apply {
             setTextColor(slate900)
             setHintTextColor(0xFF94A3B8.toInt())
             textSize = 15f
-            background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+            background = rounded(0xFFFBFDFF.toInt(), 10.dp(), 0xFFCBD5E1.toInt())
             setPadding(12.dp(), 4.dp(), 12.dp(), 4.dp())
             minHeight = 46.dp()
         }
         fun styleSpinner(spinner: Spinner): Spinner = spinner.apply {
-            background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+            background = rounded(0xFFFBFDFF.toInt(), 10.dp(), 0xFFCBD5E1.toInt())
             setPadding(8.dp(), 0, 8.dp(), 0)
             minimumHeight = 46.dp()
         }
@@ -770,26 +767,23 @@ class MainActivity : Activity() {
             setTextColor(slate900)
             textSize = 14f
             setTypeface(typeface, Typeface.BOLD)
-            background = rounded(Color.WHITE, 10.dp(), 0xFFE2E8F0.toInt())
+            background = rounded(0xFFFBFDFF.toInt(), 10.dp(), 0xFFCBD5E1.toInt())
             minHeight = 46.dp()
         }
-        fun section(title: String, body: LinearLayout.() -> Unit): LinearLayout {
+        fun panel(body: LinearLayout.() -> Unit): LinearLayout {
             return LinearLayout(this).vertical().apply {
-                background = rounded(Color.WHITE, 14.dp(), 0xFFE2E8F0.toInt())
+                background = rounded(0xFFF8FAFC.toInt(), 14.dp(), 0xFFCBD5E1.toInt())
                 setPadding(14.dp(), 12.dp(), 14.dp(), 14.dp())
-                addView(TextView(this@MainActivity).text(title).bold().apply {
-                    setTextColor(slate900)
-                    textSize = 15f
-                }, matchWrap())
                 body()
             }
         }
-        fun twoColumnRow(left: View, right: View): LinearLayout {
+        fun twoColumnRow(left: View, right: View, rightInvisible: Boolean = false): LinearLayout {
             return LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     rightMargin = 5.dp()
                 })
+                if (rightInvisible) right.visibility = View.INVISIBLE
                 addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
                     leftMargin = 5.dp()
                 })
@@ -814,13 +808,13 @@ class MainActivity : Activity() {
         ownerSpinner.setSelection(ownerIndex)
 
         val dateButton = stylePicker(Button(this).apply { text = "시작일 ${date.format(dateFormatter)}" })
-        val timeButton = stylePicker(Button(this).apply { text = "시간 %02d:%02d".format(time.hour, time.minute) })
+        val timeButton = stylePicker(Button(this).apply { text = "시작시간 %02d:%02d".format(time.hour, time.minute) })
         val timeCheck = CheckBox(this).apply {
             text = "시간 선택"
             isChecked = event != null && event.startsAt.toLocalTime() != LocalTime.MIDNIGHT
             setTextColor(slate900)
         }
-        timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.GONE
+        timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
         val periodCheck = CheckBox(this).apply {
             text = "기간 일정"
             isChecked = event?.endsAt?.toLocalDate()?.isAfter(date) == true
@@ -885,7 +879,10 @@ class MainActivity : Activity() {
         repeatSpinner.setSelection(repeatIndex)
         val endDateButton = stylePicker(Button(this).apply {
             text = "종료일 ${endDate.format(dateFormatter)}"
-            visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
+        })
+        val endTimeButton = stylePicker(Button(this).apply {
+            text = "종료시간 %02d:%02d".format(endTime.hour, endTime.minute)
+            visibility = if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
         })
         val titleInput = styleInput(EditText(this).apply {
             hint = "제목"
@@ -894,7 +891,8 @@ class MainActivity : Activity() {
         })
         val bodyInput = styleInput(EditText(this).apply {
             hint = "설명"
-            minLines = 3
+            textSize = 14f
+            minLines = 5
             gravity = Gravity.TOP or Gravity.START
             setText(event?.body.orEmpty())
         })
@@ -906,10 +904,16 @@ class MainActivity : Activity() {
 
         fun refreshButtons() {
             dateButton.text = "시작일 ${date.format(dateFormatter)}"
-            timeButton.text = "시간 %02d:%02d".format(time.hour, time.minute)
+            timeButton.text = "시작시간 %02d:%02d".format(time.hour, time.minute)
             endDateButton.text = "종료일 ${endDate.format(dateFormatter)}"
+            endTimeButton.text = "종료시간 %02d:%02d".format(endTime.hour, endTime.minute)
             endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
-            timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.GONE
+            endTimeButton.visibility = if (periodCheck.isChecked) {
+                if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
+            } else {
+                View.GONE
+            }
+            timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
             val repeatVisible = repeatCheck.isChecked
             repeatSpinner.visibility = if (repeatVisible) View.VISIBLE else View.GONE
             intervalSpinner.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition in 0..1) View.VISIBLE else View.GONE
@@ -941,6 +945,12 @@ class MainActivity : Activity() {
                 refreshButtons()
             }, time.hour, time.minute, true).show()
         }
+        endTimeButton.setOnClickListener {
+            TimePickerDialog(this, { _, hour, minute ->
+                endTime = LocalTime.of(hour, minute)
+                refreshButtons()
+            }, endTime.hour, endTime.minute, true).show()
+        }
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         timeCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         repeatCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
@@ -953,39 +963,29 @@ class MainActivity : Activity() {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
         }
 
-        root.addView(TextView(this).text(if (event == null) "새 일정을 등록합니다" else "일정 내용을 수정합니다").apply {
-            setTextColor(slate600)
-            textSize = 13f
-        }, matchWrap())
-        root.addView(section("날짜와 시간") {
-            addView(dateButton, matchWrap(top = 10))
-            addView(periodCheck, matchWrap(top = 8))
-            addView(endDateButton, matchWrap(top = 4))
-            addView(timeCheck, matchWrap(top = 8))
-            addView(timeButton, matchWrap(top = 4))
+        refreshButtons()
+        root.addView(panel {
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(periodCheck, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(timeCheck, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }, matchWrap())
+            addView(twoColumnRow(dateButton, timeButton), matchWrap(top = 8))
+            addView(twoColumnRow(endDateButton, endTimeButton), matchWrap(top = 6))
         }, matchWrap(top = 12))
-        root.addView(section("일정 내용") {
-            addView(formLabel("제목"), matchWrap(top = 10))
-            addView(titleInput, matchWrap(top = 6))
-            addView(formLabel("설명"), matchWrap(top = 10))
-            addView(bodyInput, matchWrap(top = 6))
-            addView(formLabel("장소"), matchWrap(top = 10))
-            addView(locationInput, matchWrap(top = 6))
+        root.addView(panel {
+            addView(titleInput, matchWrap())
+            addView(bodyInput, matchWrap(top = 8))
+            addView(locationInput, matchWrap(top = 8))
         }, matchWrap(top = 12))
-        root.addView(section("공유") {
-            addView(formLabel("등록할 달력"), matchWrap(top = 10))
-            addView(calendarSpinner, matchWrap(top = 6))
-            addView(formLabel("누구 일정"), matchWrap(top = 10))
-            addView(ownerSpinner, matchWrap(top = 6))
+        root.addView(panel {
+            addView(calendarSpinner, matchWrap())
+            addView(ownerSpinner, matchWrap(top = 8))
         }, matchWrap(top = 12))
-        root.addView(section("상세") {
-            addView(repeatCheck, matchWrap(top = 8))
-            addView(repeatSpinner, matchWrap(top = 4))
-            addView(TextView(this@MainActivity).text("반복 간격").apply {
-                setTextColor(slate600)
-                textSize = 12f
-            }, matchWrap(top = 8))
-            addView(intervalSpinner, matchWrap(top = 4))
+        root.addView(panel {
+            addView(repeatCheck, matchWrap())
+            addView(repeatSpinner, matchWrap(top = 6))
+            addView(intervalSpinner, matchWrap(top = 6))
             addView(weekdayRow, matchWrap(top = 4))
             addView(monthlyModeSpinner, matchWrap(top = 4))
             addView(lunarCheck, matchWrap(top = 4))
@@ -1009,7 +1009,11 @@ class MainActivity : Activity() {
                 val calendar = calendars[calendarSpinner.selectedItemPosition]
                 val owner = owners[ownerSpinner.selectedItemPosition].id.let { if (it == ALL_OWNER_ID) null else it }
                 val startsAt = LocalDateTime.of(date, if (timeCheck.isChecked) time else LocalTime.MIDNIGHT)
-                val endsAt = if (periodCheck.isChecked) LocalDateTime.of(endDate, LocalTime.of(23, 59)) else null
+                val endsAt = if (periodCheck.isChecked) {
+                    LocalDateTime.of(endDate, if (timeCheck.isChecked) endTime else LocalTime.of(23, 59))
+                } else {
+                    null
+                }
                 val recurrenceRule = if (repeatCheck.isChecked) {
                     buildRecurrenceRule(
                         repeatSpinner.selectedItemPosition,
