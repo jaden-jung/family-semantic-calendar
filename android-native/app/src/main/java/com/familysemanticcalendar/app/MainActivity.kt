@@ -800,8 +800,7 @@ class MainActivity : Activity() {
         val topPaddingDp = if (listExpanded) 3 else 2
         val bottomPaddingDp = if (listExpanded) 2 else 1
         val numberHeightDp = 14
-        val rowHeightDp = 12
-        val childHeightDp = 11
+        val normalRowHeightDp = 12
         cell.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, numberHeightDp.dp()))
 
         if (listExpanded) {
@@ -821,19 +820,27 @@ class MainActivity : Activity() {
                 cell.addView(dots, matchWrap(top = 2))
             }
         } else {
-            val holidayHeightDp = if (holiday != null) rowHeightDp else 0
+            val holidayHeightDp = if (holiday != null) normalRowHeightDp else 0
             if (holiday != null) {
                 cell.addView(TextView(this).text(holiday).size(8).apply {
                     setTextColor(0xFFDC2626.toInt())
                     includeFontPadding = false
                     gravity = Gravity.START
                     setPadding(3.dp(), 0, 0, 0)
-                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, childHeightDp.dp()).apply {
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (normalRowHeightDp - 1).dp()).apply {
                     topMargin = 1.dp()
                 })
             }
 
-            val eventRows = ((calendarCellHeight() - topPaddingDp - bottomPaddingDp - numberHeightDp - holidayHeightDp) / rowHeightDp).coerceIn(1, 8)
+            val availableEventHeight = (calendarCellHeight() - topPaddingDp - bottomPaddingDp - numberHeightDp - holidayHeightDp).coerceAtLeast(normalRowHeightDp)
+            val rowHeightDp = if (listHidden && realEvents.isNotEmpty()) {
+                (availableEventHeight / realEvents.size).coerceIn(8, normalRowHeightDp)
+            } else {
+                normalRowHeightDp
+            }
+            val childHeightDp = (rowHeightDp - 1).coerceAtLeast(7)
+            val eventTextSize = if (rowHeightDp <= 9) 7 else 8
+            val eventRows = (availableEventHeight / rowHeightDp).coerceIn(1, 10)
             val visibleEvents = if (realEvents.size > eventRows) dayEvents.take((eventRows - 1).coerceAtLeast(0)) else dayEvents.take(eventRows)
             val hiddenEventCount = (realEvents.size - visibleEvents.filterNotNull().size).coerceAtLeast(0)
             visibleEvents.forEach { eventOrNull ->
@@ -856,7 +863,7 @@ class MainActivity : Activity() {
                             visibleTitle
                         }
                     }
-                    cell.addView(TextView(this).text(title).size(8).apply {
+                    cell.addView(TextView(this).text(title).size(eventTextSize).apply {
                         setTextColor(slate900)
                         maxLines = 1
                         includeFontPadding = false
@@ -874,7 +881,7 @@ class MainActivity : Activity() {
                     })
                 }
             if (hiddenEventCount > 0) {
-                cell.addView(TextView(this).text("+$hiddenEventCount").size(8).apply {
+                cell.addView(TextView(this).text("+$hiddenEventCount").size(eventTextSize).apply {
                     setTextColor(slate600)
                     maxLines = 1
                     includeFontPadding = false
