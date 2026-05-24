@@ -72,8 +72,8 @@ class MainActivity : Activity() {
     private var currentCalendarGrid: GridLayout? = null
     private var currentEventList: LinearLayout? = null
     private var currentListTitle: TextView? = null
-    private var resizeHandleTop = -1
-    private var resizeHandleBottom = -1
+    private var resizeAreaTop = -1
+    private var resizeAreaBottom = -1
     private var resizeGestureAllowed = false
     private val calendarEventCache = mutableMapOf<LocalDate, List<EventItem?>>()
     private val multiDaySlotCache = mutableMapOf<LocalDate, Map<String, Int>>()
@@ -90,7 +90,7 @@ class MainActivity : Activity() {
                 MotionEvent.ACTION_DOWN -> {
                     swipeStartX = event.x
                     swipeStartY = event.y
-                    resizeGestureAllowed = event.rawY.toInt() in resizeHandleTop..resizeHandleBottom
+                    resizeGestureAllowed = event.rawY.toInt() in resizeAreaTop..resizeAreaBottom
                     gestureAxis = 0
                     activeSwipeViews.forEach { it.animate().cancel() }
                 }
@@ -302,8 +302,9 @@ class MainActivity : Activity() {
         val previousPage = calendarPage(previousGrid, visibleMonth.minusMonths(1))
         val nextPage = calendarPage(nextGrid, visibleMonth.plusMonths(1))
         val calendarFrame = FrameLayout(this).apply {
-            clipChildren = false
-            clipToPadding = false
+            clipChildren = true
+            clipToPadding = true
+            post { updateResizeAreaTop(this) }
         }
         val listTitle = TextView(this).text(if (dateSelected) "${selectedDate.monthValue}/${selectedDate.dayOfMonth} 일정" else "날짜를 선택해 주세요").size(18).bold().apply { setTextColor(slate900) }
         val eventList = LinearLayout(this).vertical()
@@ -319,10 +320,7 @@ class MainActivity : Activity() {
                 background = rounded(0xFF94A3B8.toInt(), 999.dp())
             }, LinearLayout.LayoutParams(44.dp(), 4.dp()))
             post {
-                val location = IntArray(2)
-                getLocationOnScreen(location)
-                resizeHandleTop = location[1] - 12.dp()
-                resizeHandleBottom = location[1] + height + 12.dp()
+                updateResizeAreaBottom(this)
             }
         }
         val listHeader = LinearLayout(this).apply {
@@ -399,6 +397,7 @@ class MainActivity : Activity() {
         previousMonthView = previousPage
         nextMonthView = nextPage
         prepareAdjacentMonthViews()
+        calendarFrame.post { prepareAdjacentMonthViews() }
         frame.addView(root, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         frame.addView(addFab, FrameLayout.LayoutParams(58.dp(), 58.dp(), Gravity.BOTTOM or Gravity.END).apply {
             rightMargin = 18.dp()
@@ -463,6 +462,18 @@ class MainActivity : Activity() {
     private fun monthDragWidth(): Float {
         val parentWidth = (currentMonthView?.parent as? View)?.width ?: currentMonthView?.width ?: 0
         return parentWidth.takeIf { it > 0 }?.toFloat() ?: resources.displayMetrics.widthPixels.toFloat()
+    }
+
+    private fun updateResizeAreaTop(view: View) {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        resizeAreaTop = location[1]
+    }
+
+    private fun updateResizeAreaBottom(view: View) {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        resizeAreaBottom = location[1] + view.height + 12.dp()
     }
 
     private fun canMoveVertical(dy: Float): Boolean {
