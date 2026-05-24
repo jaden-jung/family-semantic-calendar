@@ -821,15 +821,17 @@ class MainActivity : Activity() {
             .mapNotNull { slotByEventId[it.id] }
             .maxOrNull() ?: -1
         val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
+        val holidayReservesFirstSlot = holidayName(date) != null && slots.isNotEmpty()
         activeMultiDayEvents.forEach { event ->
             val slot = slotByEventId[event.id]
             if (slot != null && slot in slots.indices) slots[slot] = event
         }
         val singleDayEvents = dayEvents.filterNot { it.isMultiDay() }.toMutableList()
-        val compactRows = slots.map { event ->
-            event ?: singleDayEvents.removeFirstOrNull()
+        val compactRows = slots.mapIndexed { index, event ->
+            if (holidayReservesFirstSlot && index == 0 && event == null) null else event ?: singleDayEvents.removeFirstOrNull()
         } + singleDayEvents
-        return compactRows.also {
+        val visualRows = if (holidayReservesFirstSlot && compactRows.firstOrNull() == null) compactRows.drop(1) else compactRows
+        return visualRows.also {
             calendarEventCache[date] = it
         }
     }
@@ -844,16 +846,26 @@ class MainActivity : Activity() {
                     .thenBy { it.startsAt.toLocalTime() }
                     .thenBy { it.title }
             )
-        val slotEnds = mutableListOf<LocalDate>()
+        val occupiedSlotsByDay = List(7) { day ->
+            mutableSetOf<Int>().apply {
+                if (holidayName(weekStart.plusDays(day.toLong())) != null) add(0)
+            }
+        }
         val slotByEventId = mutableMapOf<String, Int>()
         weekMultiDayEvents.forEach { event ->
             val eventStart = event.startsAt.toLocalDate()
             val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
             val segmentStart = maxOf(eventStart, weekStart)
             val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
-            val reusableSlot = slotEnds.indexOfFirst { it.isBefore(segmentStart) }
-            val slot = if (reusableSlot >= 0) reusableSlot else slotEnds.size.also { slotEnds.add(segmentEnd) }
-            slotEnds[slot] = segmentEnd
+            val startCol = segmentStart.dayOfWeek.value % 7
+            val endCol = segmentEnd.dayOfWeek.value % 7
+            var slot = 0
+            while ((startCol..endCol).any { day -> occupiedSlotsByDay[day].contains(slot) }) {
+                slot += 1
+            }
+            for (day in startCol..endCol) {
+                occupiedSlotsByDay[day].add(slot)
+            }
             slotByEventId[event.id] = slot
         }
         return slotByEventId
