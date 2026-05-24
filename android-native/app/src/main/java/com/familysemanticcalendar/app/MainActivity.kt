@@ -799,8 +799,8 @@ class MainActivity : Activity() {
         }
         cell.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 14.dp()))
 
-        if (realEvents.isNotEmpty() || (!listExpanded && holiday != null)) {
-            if (listExpanded) {
+        if (listExpanded) {
+            if (realEvents.isNotEmpty()) {
                 val dots = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
@@ -814,28 +814,28 @@ class MainActivity : Activity() {
                     })
                 }
                 cell.addView(dots, matchWrap(top = 2))
-            } else {
-                data class CellRow(val event: EventItem?, val holidayText: String? = null)
-                val rows = buildList {
-                    if (holiday != null) add(CellRow(null, holiday))
-                    dayEvents.forEach { add(CellRow(it)) }
+            }
+        } else {
+            cell.addView(TextView(this).text(holiday.orEmpty()).size(8).apply {
+                setTextColor(0xFFDC2626.toInt())
+                includeFontPadding = false
+                gravity = Gravity.START
+                setPadding(3.dp(), 0, 0, 0)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
+                topMargin = 1.dp()
+            })
+
+            val eventRows = ((calendarCellHeight() - 27) / 12).coerceIn(1, 6) - if (holiday != null) 1 else 0
+            val visibleEvents = if (realEvents.size > eventRows) dayEvents.take((eventRows - 1).coerceAtLeast(0)) else dayEvents.take(eventRows)
+            val hiddenEventCount = (realEvents.size - visibleEvents.filterNotNull().size).coerceAtLeast(0)
+            visibleEvents.forEach { eventOrNull ->
+                if (eventOrNull == null) {
+                    cell.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
+                        topMargin = 1.dp()
+                    })
+                    return@forEach
                 }
-                val maxRows = ((calendarCellHeight() - 19) / 12).coerceIn(1, 6)
-                val hiddenEventCount = if (rows.size > maxRows) rows.drop(maxRows - 1).count { it.event != null } else 0
-                val visibleRows = if (hiddenEventCount > 0) rows.take(maxRows - 1) else rows.take(maxRows)
-                visibleRows.forEach { row ->
-                    if (row.holidayText != null || row.event == null) {
-                        cell.addView(TextView(this).text(row.holidayText ?: " ").size(8).apply {
-                            setTextColor(0xFFDC2626.toInt())
-                            includeFontPadding = false
-                            gravity = Gravity.START
-                            setPadding(3.dp(), 0, 0, 0)
-                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
-                            topMargin = 1.dp()
-                        })
-                        return@forEach
-                    }
-                    val event = row.event
+                val event = eventOrNull
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
@@ -865,17 +865,16 @@ class MainActivity : Activity() {
                         }
                     })
                 }
-                if (hiddenEventCount > 0) {
-                    cell.addView(TextView(this).text("+$hiddenEventCount").size(8).apply {
-                        setTextColor(slate600)
-                        maxLines = 1
-                        includeFontPadding = false
-                        gravity = Gravity.START
-                        setPadding(3.dp(), 0, 0, 0)
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
-                        topMargin = 1.dp()
-                    })
-                }
+            if (hiddenEventCount > 0) {
+                cell.addView(TextView(this).text("+$hiddenEventCount").size(8).apply {
+                    setTextColor(slate600)
+                    maxLines = 1
+                    includeFontPadding = false
+                    gravity = Gravity.START
+                    setPadding(3.dp(), 0, 0, 0)
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
+                    topMargin = 1.dp()
+                })
             }
         }
         return cell
