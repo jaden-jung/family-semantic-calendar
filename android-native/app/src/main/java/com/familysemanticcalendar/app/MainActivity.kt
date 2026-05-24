@@ -720,8 +720,12 @@ class MainActivity : Activity() {
         }
 
         val dayEvents = eventsForDate(events, date)
-        val slots = MutableList<EventItem?>(slotEnds.size) { null }
-        dayEvents.filter { it.isMultiDay() }.forEach { event ->
+        val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
+        val lastActiveSlot = activeMultiDayEvents
+            .mapNotNull { slotByEventId[it.id] }
+            .maxOrNull() ?: -1
+        val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
+        activeMultiDayEvents.forEach { event ->
             val slot = slotByEventId[event.id]
             if (slot != null && slot in slots.indices) slots[slot] = event
         }
