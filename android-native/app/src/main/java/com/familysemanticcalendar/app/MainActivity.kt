@@ -1848,6 +1848,8 @@ class MainActivity : Activity() {
         }
         add("내 일정 색상", "달력 일정 앞쪽에 표시되는 내 색상") { showMyOwnerColorDialog(returnToSettings = true) }
         add("검색 임계치 설정", NativeStore.searchMaxDistance(this).toString()) { showSearchThresholdDialog(returnToSettings = true) }
+        add("\uBE44\uBC00\uBC88\uD638 \uBCC0\uACBD", "\uD604\uC7AC \uBE44\uBC00\uBC88\uD638\uB85C \uD655\uC778 \uD6C4 \uBCC0\uACBD") { showChangePasswordDialog(returnToSettings = true) }
+        add("\uB85C\uADF8\uC544\uC6C3", "\uC774 \uAE30\uAE30\uC758 \uC790\uB3D9 \uB85C\uADF8\uC778\uC744 \uD574\uC81C") { confirmLogout() }
         add("초대코드로 참여", "가족 달력에 참여") { showJoinCalendarDialog(currentUser, returnToSettings = true) }
         add("새 달력 만들기", "공유할 달력 추가") { showCreateCalendarDialog(currentUser, returnToSettings = true) }
         dialog.show()
@@ -1988,6 +1990,81 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
+    private fun showChangePasswordDialog(returnToSettings: Boolean = false) {
+        val currentInput = EditText(this).apply {
+            hint = "\uD604\uC7AC \uBE44\uBC00\uBC88\uD638"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val newInput = EditText(this).apply {
+            hint = "\uC0C8 \uBE44\uBC00\uBC88\uD638"
+            setSingleLine(true)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val content = dialogPanel().apply {
+            addView(TextView(this@MainActivity).text("\uBE44\uBC00\uBC88\uD638 \uBCC0\uACBD").size(20).bold().apply {
+                setTextColor(slate900)
+            }, matchWrap())
+            addView(currentInput, matchWrap(top = 14))
+            addView(newInput, matchWrap(top = 10))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setView(content)
+            .setNegativeButton("\uCDE8\uC18C") { _, _ -> if (returnToSettings) showCalendarDialog() }
+            .setPositiveButton("\uBCC0\uACBD", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val current = currentInput.text.toString()
+                val newPassword = newInput.text.toString()
+                if (current.isBlank() || newPassword.isBlank()) {
+                    toast("\uBE44\uBC00\uBC88\uD638\uB97C \uC785\uB825\uD574 \uC8FC\uC138\uC694.")
+                    return@setOnClickListener
+                }
+                background(
+                    work = { CalendarApi.changePassword(current, newPassword) },
+                    done = {
+                        toast("\uBE44\uBC00\uBC88\uD638\uB97C \uBCC0\uACBD\uD588\uC2B5\uB2C8\uB2E4.")
+                        dialog.dismiss()
+                        if (returnToSettings) showCalendarDialog()
+                    },
+                )
+            }
+        }
+        dialog.setOnCancelListener { if (returnToSettings) showCalendarDialog() }
+        dialog.show()
+    }
+
+    private fun confirmLogout() {
+        AlertDialog.Builder(this)
+            .setTitle("\uB85C\uADF8\uC544\uC6C3")
+            .setMessage("\uC774 \uAE30\uAE30\uC5D0\uC11C \uC790\uB3D9 \uB85C\uADF8\uC778\uC744 \uD574\uC81C\uD560\uAE4C\uC694?")
+            .setNegativeButton("\uCDE8\uC18C", null)
+            .setPositiveButton("\uB85C\uADF8\uC544\uC6C3") { _, _ ->
+                background(
+                    work = {
+                        try {
+                            CalendarApi.logout()
+                        } finally {
+                            NativeStore.clearSession(this)
+                            CalendarApi.accessToken = null
+                        }
+                    },
+                    done = {
+                        user = null
+                        showLogin()
+                    },
+                    failed = {
+                        NativeStore.clearSession(this)
+                        CalendarApi.accessToken = null
+                        user = null
+                        showLogin()
+                    },
+                )
+            }
+            .show()
+    }
+
     private fun showCreateCalendarDialog(currentUser: User, returnToSettings: Boolean = false) {
         val input = EditText(this).apply {
             hint = "달력 이름"
@@ -2108,6 +2185,14 @@ class MainActivity : Activity() {
             try {
                 val result = work()
                 runOnUiThread { done(result) }
+            } catch (error: AuthExpiredException) {
+                runOnUiThread {
+                    NativeStore.clearSession(this)
+                    CalendarApi.accessToken = null
+                    user = null
+                    toast("로그인이 만료되었습니다.")
+                    showLogin()
+                }
             } catch (error: Exception) {
                 runOnUiThread {
                     toast(error.message ?: "요청 실패")

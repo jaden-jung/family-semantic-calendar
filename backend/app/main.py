@@ -22,6 +22,7 @@ from app.schemas import (
     EventOut,
     SearchEventOut,
     EventUpdate,
+    PasswordChange,
     SearchQuery,
     UserCreate,
     UserOut,
@@ -83,7 +84,7 @@ def auth_response(conn, user) -> dict:
     }
 
 
-def current_user(authorization: Annotated[str | None, Header(alias="Authorization")] = None):
+def current_session(authorization: Annotated[str | None, Header(alias="Authorization")] = None):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
     token = authorization.split(" ", 1)[1].strip()
@@ -92,7 +93,7 @@ def current_user(authorization: Annotated[str | None, Header(alias="Authorizatio
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT u.id, u.display_name
+            SELECT s.id AS session_id, u.id, u.display_name
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = %s
@@ -104,6 +105,10 @@ def current_user(authorization: Annotated[str | None, Header(alias="Authorizatio
     if not row:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     return row
+
+
+def current_user(session: Annotated[dict, Depends(current_session)]):
+    return session
 
 
 def event_embedding_text_from_payload(payload: EventCreate | EventUpdate) -> str:
@@ -199,6 +204,56 @@ def sign_in(payload: UserSignIn):
         response = auth_response(conn, row)
         conn.commit()
         return response
+
+
+@app.post("/auth/logout")
+def logout(session: Annotated[dict, Depends(current_session)]):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE sessions SET revoked_at = now() WHERE id = %s",
+            (session["session_id"],),
+        )
+        conn.commit()
+        return {"status": "ok"}
+
+
+@app.post("/auth/password")
+def change_password(payload: PasswordChange, session: Annotated[dict, Depends(current_session)]):
+    new_password = payload.new_password.strip()
+    if not new_password:
+        raise HTTPException(status_code=422, detail="New password is required")
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE id = %s
+              AND password_hash = crypt(%s, password_hash)
+            """,
+            (session["id"], payload.current_password),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=400, detail="Invalid current password")
+        conn.execute(
+            """
+            UPDATE users
+            SET password_hash = crypt(%s, gen_salt('bf'))
+            WHERE id = %s
+            """,
+            (new_password, session["id"]),
+        )
+        conn.execute(
+            """
+            UPDATE sessions
+            SET revoked_at = now()
+            WHERE user_id = %s
+              AND id <> %s
+              AND revoked_at IS NULL
+            """,
+            (session["id"], session["session_id"]),
+        )
+        conn.commit()
+        return {"status": "ok"}
 
 
 @app.get("/auth/users", response_model=list[UserOut])

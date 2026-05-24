@@ -17,6 +17,11 @@ class UserSignIn(BaseModel):
     password: str = Field(default="", max_length=200)
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=1, max_length=200)
+
+
 class UserOut(BaseModel):
     id: UUID
     display_name: str

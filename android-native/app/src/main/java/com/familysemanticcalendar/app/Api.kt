@@ -64,6 +64,15 @@ object NativeStore {
             .apply()
     }
 
+    fun clearSession(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(USER_ID)
+            .remove(DISPLAY_NAME)
+            .remove(ACCESS_TOKEN)
+            .apply()
+    }
+
     fun savedUser(context: Context): User? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val id = prefs.getString(USER_ID, null) ?: return null
@@ -157,6 +166,19 @@ object CalendarApi {
             .put("password", password)
             .toString()
         return JSONObject(request("POST", "/users", body)).toAuthSession()
+    }
+
+    fun logout() {
+        request("POST", "/auth/logout")
+        accessToken = null
+    }
+
+    fun changePassword(currentPassword: String, newPassword: String) {
+        val body = JSONObject()
+            .put("current_password", currentPassword)
+            .put("new_password", newPassword)
+            .toString()
+        request("POST", "/auth/password", body)
     }
 
     fun listCalendars(userId: String): List<CalendarItem> {
@@ -331,11 +353,14 @@ object CalendarApi {
         val text = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
         if (connection.responseCode !in 200..299) {
             val detail = try { JSONObject(text).optString("detail", text) } catch (_: Exception) { text }
+            if (connection.responseCode == 401 && accessToken != null) throw AuthExpiredException(detail)
             throw IllegalStateException(detail.ifBlank { "HTTP ${connection.responseCode}" })
         }
         return text
     }
 }
+
+class AuthExpiredException(message: String) : IllegalStateException(message)
 
 fun eventsForDate(events: List<EventItem>, date: LocalDate): List<EventItem> {
     return events.filter { it.occursOn(date) }
