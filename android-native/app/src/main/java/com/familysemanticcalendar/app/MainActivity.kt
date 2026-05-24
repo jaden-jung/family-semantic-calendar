@@ -63,6 +63,7 @@ class MainActivity : Activity() {
     private var currentMonthView: View? = null
     private var previousMonthView: View? = null
     private var nextMonthView: View? = null
+    private var currentCalendarGrid: GridLayout? = null
     private var currentEventList: LinearLayout? = null
     private var currentListTitle: TextView? = null
 
@@ -94,7 +95,6 @@ class MainActivity : Activity() {
                     }
                     if (gestureAxis == 1) {
                         moveMonthViews(dx)
-                        activeSwipeViews.drop(1).forEach { view -> view.translationX = dx * 0.38f }
                         return true
                     }
                     if (gestureAxis == 2) {
@@ -358,6 +358,7 @@ class MainActivity : Activity() {
         currentEventList = eventList
         currentListTitle = listTitle
         activeSwipeViews = listOf(calendarGrid, listPanel)
+        currentCalendarGrid = calendarGrid
         currentMonthView = calendarGrid
         previousMonthView = previousGrid
         nextMonthView = nextGrid
@@ -597,12 +598,22 @@ class MainActivity : Activity() {
                 saturday = date.dayOfWeek.value == 6,
             )
             cell.setOnClickListener {
-                selectedDate = date
-                dateSelected = true
-                visibleMonth = YearMonth.from(date)
-                showCalendar()
+                selectCalendarDate(date)
             }
             grid.addView(cell, cellParams(calendarCellHeight()))
+        }
+    }
+
+    private fun selectCalendarDate(date: LocalDate) {
+        selectedDate = date
+        dateSelected = true
+        val targetMonth = YearMonth.from(date)
+        if (targetMonth == visibleMonth) {
+            currentCalendarGrid?.let { drawCalendar(it, visibleMonth) }
+            refreshCurrentEventList()
+        } else {
+            visibleMonth = targetMonth
+            showCalendar()
         }
     }
 
@@ -633,9 +644,9 @@ class MainActivity : Activity() {
                 else -> Color.WHITE
             },
             radius = 0,
-            strokeColor = if (selected) teal else 0xFFE5E7EB.toInt(),
-            strokeWidth = if (selected) 2.dp() else 1,
+            strokeColor = 0xFFE5E7EB.toInt(),
         )
+        cell.foreground = if (selected) rounded(Color.TRANSPARENT, 0, teal, 2.dp()) else null
 
         val number = TextView(this).text(date.dayOfMonth.toString()).size(11).bold().apply {
             gravity = Gravity.START
@@ -683,7 +694,13 @@ class MainActivity : Activity() {
                         gravity = Gravity.START
                         background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
                         setPadding(3.dp(), 0, 3.dp(), 0)
-                    }, matchWrap(top = 1))
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        topMargin = 1.dp()
+                        if (!multiDay) {
+                            leftMargin = 3.dp()
+                            rightMargin = 3.dp()
+                        }
+                    })
                 }
             }
         }
