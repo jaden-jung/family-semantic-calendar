@@ -108,6 +108,7 @@ class MainActivity : Activity() {
                         return true
                     }
                     if (gestureAxis == 2 && resizeGestureAllowed) {
+                        moveVerticalViews(dy)
                         return true
                     }
                     if (gestureAxis == -1 && resizeGestureAllowed) return true
@@ -125,7 +126,6 @@ class MainActivity : Activity() {
                             resetGestureTransforms()
                             monthTransitionDirection = 0
                             showCalendar()
-                            playListResizeTransition()
                             return true
                         }
                         gestureAxis == 1 -> {
@@ -721,15 +721,24 @@ class MainActivity : Activity() {
 
         val dayEvents = eventsForDate(events, date)
         val activeMultiDayEvents = dayEvents.filter { it.isMultiDay() }
-        val lastActiveSlot = activeMultiDayEvents
+        val visibleActiveMultiDayEvents = activeMultiDayEvents.filter { shouldShowMultiDayInCell(it, date) }
+        val lastActiveSlot = visibleActiveMultiDayEvents
             .mapNotNull { slotByEventId[it.id] }
             .maxOrNull() ?: -1
         val slots = MutableList<EventItem?>(lastActiveSlot + 1) { null }
-        activeMultiDayEvents.forEach { event ->
+        visibleActiveMultiDayEvents.forEach { event ->
             val slot = slotByEventId[event.id]
             if (slot != null && slot in slots.indices) slots[slot] = event
         }
         return slots + dayEvents.filterNot { it.isMultiDay() }
+    }
+
+    private fun shouldShowMultiDayInCell(event: EventItem, date: LocalDate): Boolean {
+        val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
+        val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
+        val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
+        if (segmentOffset == 0) return true
+        return event.title.drop(segmentOffset * 7).length > 2
     }
 
     private fun replaceCalendarCell(date: LocalDate) {
@@ -789,14 +798,7 @@ class MainActivity : Activity() {
         }
         cell.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 12.dp()))
 
-        if (!listExpanded) {
-            cell.addView(TextView(this).text(holiday?.take(4) ?: " ").size(8).center().apply {
-                setTextColor(0xFFDC2626.toInt())
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 8.dp()))
-        }
-
-        if (realEvents.isNotEmpty()) {
+        if (realEvents.isNotEmpty() || (!listExpanded && holiday != null)) {
             if (listExpanded) {
                 val dots = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -812,16 +814,28 @@ class MainActivity : Activity() {
                 }
                 cell.addView(dots, matchWrap(top = 2))
             } else {
-                dayEvents.take(3).forEachIndexed { index, event ->
-                    if (event == null) {
-                        cell.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
+                data class CellRow(val event: EventItem?, val holidayText: String? = null)
+                val rows = buildList {
+                    if (holiday != null) add(CellRow(null, holiday))
+                    dayEvents.forEach { add(CellRow(it)) }
+                }
+                rows.take(3).forEachIndexed { index, row ->
+                    if (row.holidayText != null || row.event == null) {
+                        cell.addView(TextView(this).text(row.holidayText ?: " ").size(8).apply {
+                            setTextColor(0xFFDC2626.toInt())
+                            includeFontPadding = false
+                            gravity = Gravity.START
+                            setPadding(3.dp(), 0, 0, 0)
+                        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
                             topMargin = 1.dp()
                         })
                         return@forEachIndexed
                     }
+                    val event = row.event
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
-                    val moreText = if (index == 2 && realEvents.size > 3) " ..." else ""
+                    val rowCount = realEvents.size + if (holiday == null) 0 else 1
+                    val moreText = if (index == 2 && rowCount > 3) " ..." else ""
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
                     val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
