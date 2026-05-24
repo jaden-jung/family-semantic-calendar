@@ -807,14 +807,12 @@ class MainActivity : Activity() {
         val ownerIndex = owners.indexOfFirst { it.id == defaultOwnerId }.let { if (it >= 0) it else 0 }
         ownerSpinner.setSelection(ownerIndex)
 
-        val dateButton = stylePicker(Button(this).apply { text = "시작일 ${date.format(dateFormatter)}" })
-        val timeButton = stylePicker(Button(this).apply { text = "시작시간 %02d:%02d".format(time.hour, time.minute) })
+        val dateButton = stylePicker(Button(this).apply { text = date.format(dateFormatter) })
         val timeCheck = CheckBox(this).apply {
             text = "시간 선택"
             isChecked = event != null && event.startsAt.toLocalTime() != LocalTime.MIDNIGHT
             setTextColor(slate900)
         }
-        timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
         val periodCheck = CheckBox(this).apply {
             text = "기간 일정"
             isChecked = event?.endsAt?.toLocalDate()?.isAfter(date) == true
@@ -878,12 +876,12 @@ class MainActivity : Activity() {
         }
         repeatSpinner.setSelection(repeatIndex)
         val endDateButton = stylePicker(Button(this).apply {
-            text = "종료일 ${endDate.format(dateFormatter)}"
+            text = endDate.format(dateFormatter)
         })
-        val endTimeButton = stylePicker(Button(this).apply {
-            text = "종료시간 %02d:%02d".format(endTime.hour, endTime.minute)
-            visibility = if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
-        })
+        val rangeDivider = TextView(this).text("~").center().bold().apply {
+            setTextColor(slate600)
+            textSize = 18f
+        }
         val titleInput = styleInput(EditText(this).apply {
             hint = "제목"
             setSingleLine(true)
@@ -903,17 +901,18 @@ class MainActivity : Activity() {
         })
 
         fun refreshButtons() {
-            dateButton.text = "시작일 ${date.format(dateFormatter)}"
-            timeButton.text = "시작시간 %02d:%02d".format(time.hour, time.minute)
-            endDateButton.text = "종료일 ${endDate.format(dateFormatter)}"
-            endTimeButton.text = "종료시간 %02d:%02d".format(endTime.hour, endTime.minute)
-            endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.GONE
-            endTimeButton.visibility = if (periodCheck.isChecked) {
-                if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
+            dateButton.text = if (timeCheck.isChecked) {
+                "${date.format(dateFormatter)} %02d:%02d".format(time.hour, time.minute)
             } else {
-                View.GONE
+                date.format(dateFormatter)
             }
-            timeButton.visibility = if (timeCheck.isChecked) View.VISIBLE else View.INVISIBLE
+            endDateButton.text = if (timeCheck.isChecked) {
+                "${endDate.format(dateFormatter)} %02d:%02d".format(endTime.hour, endTime.minute)
+            } else {
+                endDate.format(dateFormatter)
+            }
+            endDateButton.visibility = if (periodCheck.isChecked) View.VISIBLE else View.INVISIBLE
+            rangeDivider.visibility = if (periodCheck.isChecked) View.VISIBLE else View.INVISIBLE
             val repeatVisible = repeatCheck.isChecked
             repeatSpinner.visibility = if (repeatVisible) View.VISIBLE else View.GONE
             intervalSpinner.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition in 0..1) View.VISIBLE else View.GONE
@@ -925,31 +924,37 @@ class MainActivity : Activity() {
             lunarCheck.visibility = if (repeatVisible && repeatSpinner.selectedItemPosition == 3) View.VISIBLE else View.GONE
         }
 
-        dateButton.setOnClickListener {
+        fun pickDateTime(
+            initialDate: LocalDate,
+            initialTime: LocalTime,
+            onPicked: (LocalDate, LocalTime) -> Unit,
+        ) {
             DatePickerDialog(this, { _, year, month, day ->
-                date = LocalDate.of(year, month + 1, day)
+                val pickedDate = LocalDate.of(year, month + 1, day)
+                if (timeCheck.isChecked) {
+                    TimePickerDialog(this, { _, hour, minute ->
+                        onPicked(pickedDate, LocalTime.of(hour, minute))
+                    }, initialTime.hour, initialTime.minute, true).show()
+                } else {
+                    onPicked(pickedDate, initialTime)
+                }
+            }, initialDate.year, initialDate.monthValue - 1, initialDate.dayOfMonth).show()
+        }
+        dateButton.setOnClickListener {
+            pickDateTime(date, time) { pickedDate, pickedTime ->
+                date = pickedDate
+                time = pickedTime
                 if (endDate.isBefore(date)) endDate = date
                 refreshButtons()
-            }, date.year, date.monthValue - 1, date.dayOfMonth).show()
+            }
         }
         endDateButton.setOnClickListener {
-            DatePickerDialog(this, { _, year, month, day ->
-                endDate = LocalDate.of(year, month + 1, day)
+            pickDateTime(endDate, endTime) { pickedDate, pickedTime ->
+                endDate = pickedDate
+                endTime = pickedTime
                 if (endDate.isBefore(date)) endDate = date
                 refreshButtons()
-            }, endDate.year, endDate.monthValue - 1, endDate.dayOfMonth).show()
-        }
-        timeButton.setOnClickListener {
-            TimePickerDialog(this, { _, hour, minute ->
-                time = LocalTime.of(hour, minute)
-                refreshButtons()
-            }, time.hour, time.minute, true).show()
-        }
-        endTimeButton.setOnClickListener {
-            TimePickerDialog(this, { _, hour, minute ->
-                endTime = LocalTime.of(hour, minute)
-                refreshButtons()
-            }, endTime.hour, endTime.minute, true).show()
+            }
         }
         periodCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
         timeCheck.setOnCheckedChangeListener { _, _ -> refreshButtons() }
@@ -970,8 +975,16 @@ class MainActivity : Activity() {
                 addView(periodCheck, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(timeCheck, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             }, matchWrap())
-            addView(twoColumnRow(dateButton, timeButton), matchWrap(top = 8))
-            addView(twoColumnRow(endDateButton, endTimeButton), matchWrap(top = 6))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(dateButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(rangeDivider, LinearLayout.LayoutParams(28.dp(), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    leftMargin = 4.dp()
+                    rightMargin = 4.dp()
+                    gravity = Gravity.CENTER_VERTICAL
+                })
+                addView(endDateButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }, matchWrap(top = 8))
         }, matchWrap(top = 12))
         root.addView(panel {
             addView(titleInput, matchWrap())
