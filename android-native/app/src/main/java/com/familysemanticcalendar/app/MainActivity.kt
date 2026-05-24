@@ -708,7 +708,11 @@ class MainActivity : Activity() {
             val slot = slotByEventId[event.id]
             if (slot != null && slot in slots.indices) slots[slot] = event
         }
-        return (slots + dayEvents.filterNot { it.isMultiDay() }).also {
+        val singleDayEvents = dayEvents.filterNot { it.isMultiDay() }.toMutableList()
+        val compactRows = slots.map { event ->
+            event ?: singleDayEvents.removeFirstOrNull()
+        } + singleDayEvents
+        return compactRows.also {
             calendarEventCache[date] = it
         }
     }
