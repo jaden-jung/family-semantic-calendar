@@ -41,6 +41,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 class MainActivity : Activity() {
     private val monthFormatter = DateTimeFormatter.ofPattern("yyyy년 M월")
@@ -581,40 +582,57 @@ class MainActivity : Activity() {
         listOf("일", "월", "화", "수", "목", "금", "토").forEachIndexed { index, label ->
             grid.addView(dayText(label, header = true, sunday = index == 0, saturday = index == 6), cellParams(32))
         }
-        val first = month.atDay(1)
-        val start = first.minusDays(first.dayOfWeek.value % 7L)
+        val start = calendarGridStart(month)
         repeat(42) { index ->
             val date = start.plusDays(index.toLong())
-            val dayEvents = eventsForDate(events, date)
-            val holiday = holidayName(date)
-            val cell = dayCell(
-                date = date,
-                holiday = holiday,
-                dayEvents = dayEvents,
-                inMonth = date.month == month.month,
-                today = date == LocalDate.now(),
-                selected = dateSelected && date == selectedDate,
-                sunday = date.dayOfWeek.value == 7 || holiday != null,
-                saturday = date.dayOfWeek.value == 6,
-            )
-            cell.setOnClickListener {
-                selectCalendarDate(date)
-            }
-            grid.addView(cell, cellParams(calendarCellHeight()))
+            grid.addView(calendarCellFor(date, month), cellParams(calendarCellHeight()))
         }
     }
 
     private fun selectCalendarDate(date: LocalDate) {
+        val previousDate = selectedDate.takeIf { dateSelected }
         selectedDate = date
         dateSelected = true
         val targetMonth = YearMonth.from(date)
         if (targetMonth == visibleMonth) {
-            currentCalendarGrid?.let { drawCalendar(it, visibleMonth) }
+            previousDate?.let { replaceCalendarCell(it) }
+            replaceCalendarCell(date)
             refreshCurrentEventList()
         } else {
             visibleMonth = targetMonth
             showCalendar()
         }
+    }
+
+    private fun calendarGridStart(month: YearMonth): LocalDate {
+        val first = month.atDay(1)
+        return first.minusDays(first.dayOfWeek.value % 7L)
+    }
+
+    private fun calendarCellFor(date: LocalDate, month: YearMonth): LinearLayout {
+        val holiday = holidayName(date)
+        return dayCell(
+            date = date,
+            holiday = holiday,
+            dayEvents = eventsForDate(events, date),
+            inMonth = date.month == month.month,
+            today = date == LocalDate.now(),
+            selected = dateSelected && date == selectedDate,
+            sunday = date.dayOfWeek.value == 7 || holiday != null,
+            saturday = date.dayOfWeek.value == 6,
+        ).apply {
+            setOnClickListener { selectCalendarDate(date) }
+        }
+    }
+
+    private fun replaceCalendarCell(date: LocalDate) {
+        val grid = currentCalendarGrid ?: return
+        val index = ChronoUnit.DAYS.between(calendarGridStart(visibleMonth), date).toInt()
+        if (index !in 0 until 42) return
+        val childIndex = index + 7
+        if (childIndex >= grid.childCount) return
+        grid.removeViewAt(childIndex)
+        grid.addView(calendarCellFor(date, visibleMonth), childIndex, cellParams(calendarCellHeight()))
     }
 
     private fun refreshCurrentEventList() {
@@ -696,8 +714,10 @@ class MainActivity : Activity() {
                         setPadding(3.dp(), 0, 3.dp(), 0)
                     }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
                         topMargin = 1.dp()
-                        if (!multiDay) {
+                        if (!multiDay || segmentStart) {
                             leftMargin = 3.dp()
+                        }
+                        if (!multiDay) {
                             rightMargin = 3.dp()
                         }
                     })
