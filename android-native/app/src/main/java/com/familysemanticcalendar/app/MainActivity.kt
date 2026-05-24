@@ -684,7 +684,7 @@ class MainActivity : Activity() {
         return dayCell(
             date = date,
             holiday = holiday,
-            dayEvents = eventsForDate(events, date),
+            dayEvents = calendarEventsForDate(date),
             inMonth = date.month == month.month,
             today = date == LocalDate.now(),
             selected = dateSelected && date == selectedDate,
@@ -693,6 +693,39 @@ class MainActivity : Activity() {
         ).apply {
             setOnClickListener { selectCalendarDate(date) }
         }
+    }
+
+    private fun calendarEventsForDate(date: LocalDate): List<EventItem?> {
+        val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
+        val weekDates = (0..6).map { weekStart.plusDays(it.toLong()) }
+        val weekMultiDayEvents = weekDates
+            .flatMap { day -> eventsForDate(events, day).filter { it.isMultiDay() } }
+            .distinctBy { it.id }
+            .sortedWith(
+                compareBy<EventItem> { it.startsAt.toLocalDate() }
+                    .thenBy { it.startsAt.toLocalTime() }
+                    .thenBy { it.title }
+            )
+        val slotEnds = mutableListOf<LocalDate>()
+        val slotByEventId = mutableMapOf<String, Int>()
+        weekMultiDayEvents.forEach { event ->
+            val eventStart = event.startsAt.toLocalDate()
+            val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
+            val segmentStart = maxOf(eventStart, weekStart)
+            val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
+            val reusableSlot = slotEnds.indexOfFirst { it.isBefore(segmentStart) }
+            val slot = if (reusableSlot >= 0) reusableSlot else slotEnds.size.also { slotEnds.add(segmentEnd) }
+            slotEnds[slot] = segmentEnd
+            slotByEventId[event.id] = slot
+        }
+
+        val dayEvents = eventsForDate(events, date)
+        val slots = MutableList<EventItem?>(slotEnds.size) { null }
+        dayEvents.filter { it.isMultiDay() }.forEach { event ->
+            val slot = slotByEventId[event.id]
+            if (slot != null && slot in slots.indices) slots[slot] = event
+        }
+        return slots + dayEvents.filterNot { it.isMultiDay() }
     }
 
     private fun replaceCalendarCell(date: LocalDate) {
@@ -714,16 +747,17 @@ class MainActivity : Activity() {
     private fun dayCell(
         date: LocalDate,
         holiday: String?,
-        dayEvents: List<EventItem>,
+        dayEvents: List<EventItem?>,
         inMonth: Boolean,
         today: Boolean,
         selected: Boolean,
         sunday: Boolean,
         saturday: Boolean,
     ): LinearLayout {
+        val realEvents = dayEvents.filterNotNull()
         val cell = LinearLayout(this).vertical()
         cell.gravity = Gravity.START
-        cell.setPadding(0, if (listExpanded) 3.dp() else 4.dp(), 0, 2.dp())
+        cell.setPadding(0, if (listExpanded) 3.dp() else 2.dp(), 0, if (listExpanded) 2.dp() else 1.dp())
         cell.background = rounded(
             fillColor = when {
                 selected -> 0xFFD1FAE5.toInt()
@@ -738,6 +772,7 @@ class MainActivity : Activity() {
 
         val number = TextView(this).text(date.dayOfMonth.toString()).size(11).bold().apply {
             gravity = Gravity.START
+            includeFontPadding = false
             setPadding(3.dp(), 0, 3.dp(), 0)
             setTextColor(
                 when {
@@ -748,22 +783,22 @@ class MainActivity : Activity() {
                 }
             )
         }
-        cell.addView(number, matchWrap())
+        cell.addView(number, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 12.dp()))
 
         if (!listExpanded) {
             cell.addView(TextView(this).text(holiday?.take(4) ?: " ").size(8).center().apply {
                 setTextColor(0xFFDC2626.toInt())
                 includeFontPadding = false
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 10.dp()))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 8.dp()))
         }
 
-        if (dayEvents.isNotEmpty()) {
+        if (realEvents.isNotEmpty()) {
             if (listExpanded) {
                 val dots = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                 }
-                dayEvents.map { calendarColor(it.calendarId) }.distinct().take(4).forEach { color ->
+                realEvents.map { calendarColor(it.calendarId) }.distinct().take(4).forEach { color ->
                     dots.addView(View(this).apply {
                         background = rounded(color, 999.dp())
                     }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
@@ -774,15 +809,24 @@ class MainActivity : Activity() {
                 cell.addView(dots, matchWrap(top = 2))
             } else {
                 dayEvents.take(3).forEachIndexed { index, event ->
+                    if (event == null) {
+                        cell.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
+                            topMargin = 1.dp()
+                        })
+                        return@forEachIndexed
+                    }
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
-                    val moreText = if (index == 2 && dayEvents.size > 3) " ..." else ""
+                    val moreText = if (index == 2 && realEvents.size > 3) " ..." else ""
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val segmentBase = maxOf(event.startsAt.toLocalDate(), weekStart)
                     val segmentOffset = ChronoUnit.DAYS.between(segmentBase, date).coerceAtLeast(0).toInt()
                     val title = when {
                         !multiDay -> "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText"
-                        else -> event.title.drop(segmentOffset * 7).take(7).ifBlank { " " }
+                        else -> {
+                            val chunk = event.title.drop(segmentOffset * 7).take(7)
+                            if (segmentOffset > 0 && chunk.length <= 2) " " else chunk.ifBlank { " " }
+                        }
                     }
                     cell.addView(TextView(this).text(title).size(8).apply {
                         setTextColor(slate900)
@@ -790,7 +834,7 @@ class MainActivity : Activity() {
                         includeFontPadding = false
                         gravity = Gravity.START
                         background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
-                        setPadding(3.dp(), 0, 3.dp(), 0)
+                        setPadding(if (!multiDay || segmentStart) 3.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
                     }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
                         topMargin = 1.dp()
                         if (!multiDay || segmentStart) {
@@ -1378,10 +1422,15 @@ class MainActivity : Activity() {
             }
         }
         dialog.show()
-        input.post {
+        dialog.window?.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        )
+        input.postDelayed({
             input.requestFocus()
-            (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
-        }
+            (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                .showSoftInput(input, InputMethodManager.SHOW_FORCED)
+        }, 200)
     }
 
     private fun showSearchResults(results: List<EventItem>) {
