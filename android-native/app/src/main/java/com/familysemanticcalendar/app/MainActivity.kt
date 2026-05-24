@@ -836,7 +836,7 @@ class MainActivity : Activity() {
             val rowHeightDp = normalRowHeightDp
             val childHeightDp = (rowHeightDp - 1).coerceAtLeast(7)
             val eventTextSize = 8
-            val eventRows = (availableEventHeight / rowHeightDp).coerceIn(1, 10)
+            val eventRows = ((availableEventHeight / rowHeightDp) + if (listHidden) 1 else 0).coerceIn(1, 10)
             val visibleEvents = if (realEvents.size > eventRows) dayEvents.take((eventRows - 1).coerceAtLeast(0)) else dayEvents.take(eventRows)
             val hiddenEventCount = (realEvents.size - visibleEvents.filterNotNull().size).coerceAtLeast(0)
             visibleEvents.forEach { eventOrNull ->
