@@ -69,6 +69,9 @@ class MainActivity : Activity() {
     private var currentCalendarGrid: GridLayout? = null
     private var currentEventList: LinearLayout? = null
     private var currentListTitle: TextView? = null
+    private var resizeHandleTop = -1
+    private var resizeHandleBottom = -1
+    private var resizeGestureAllowed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -82,6 +85,7 @@ class MainActivity : Activity() {
                 MotionEvent.ACTION_DOWN -> {
                     swipeStartX = event.x
                     swipeStartY = event.y
+                    resizeGestureAllowed = event.rawY.toInt() in resizeHandleTop..resizeHandleBottom
                     gestureAxis = 0
                     activeSwipeViews.forEach { it.animate().cancel() }
                 }
@@ -90,20 +94,22 @@ class MainActivity : Activity() {
                     val dy = event.y - swipeStartY
                     if (gestureAxis == 0 && (kotlin.math.abs(dx) > 14.dp() || kotlin.math.abs(dy) > 14.dp())) {
                         gestureAxis = if (kotlin.math.abs(dx) >= kotlin.math.abs(dy)) 1 else 2
-                        if (gestureAxis == 2 && !canMoveVertical(dy)) {
+                        if (gestureAxis == 2 && (!resizeGestureAllowed || !canMoveVertical(dy))) {
                             gestureAxis = -1
-                            resetGestureTransforms()
-                            return true
+                            if (resizeGestureAllowed) {
+                                resetGestureTransforms()
+                                return true
+                            }
                         }
                     }
                     if (gestureAxis == 1) {
                         moveMonthViews(dx)
                         return true
                     }
-                    if (gestureAxis == 2) {
+                    if (gestureAxis == 2 && resizeGestureAllowed) {
                         return true
                     }
-                    if (gestureAxis == -1) return true
+                    if (gestureAxis == -1 && resizeGestureAllowed) return true
                 }
                 MotionEvent.ACTION_UP -> {
                     val dx = event.x - swipeStartX
@@ -113,7 +119,7 @@ class MainActivity : Activity() {
                             animateMonthDragCommit(if (dx < 0) 1 else -1)
                             return true
                         }
-                        kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
+                        resizeGestureAllowed && kotlin.math.abs(dy) > 70.dp() && kotlin.math.abs(dy) > kotlin.math.abs(dx) -> {
                             if (!applyVerticalListMode(dy)) return true
                             resetGestureTransforms()
                             monthTransitionDirection = 0
@@ -307,6 +313,19 @@ class MainActivity : Activity() {
             setPadding(14.dp(), 12.dp(), 14.dp(), 14.dp())
             visibility = if (listHidden) View.GONE else View.VISIBLE
         }
+        val resizeHandle = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, 7.dp(), 0, 5.dp())
+            addView(View(this@MainActivity).apply {
+                background = rounded(0xFF94A3B8.toInt(), 999.dp())
+            }, LinearLayout.LayoutParams(44.dp(), 4.dp()))
+            post {
+                val location = IntArray(2)
+                getLocationOnScreen(location)
+                resizeHandleTop = location[1] - 12.dp()
+                resizeHandleBottom = location[1] + height + 12.dp()
+            }
+        }
         val listHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -350,6 +369,7 @@ class MainActivity : Activity() {
                 }
             },
         )
+        root.addView(resizeHandle, matchWrap(top = if (listHidden) 2 else 4))
         listHeader.addView(listTitle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         listPanel.addView(listHeader, matchWrap())
         listPanel.addView(ScrollView(this).apply {
@@ -751,17 +771,19 @@ class MainActivity : Activity() {
                 }
                 cell.addView(dots, matchWrap(top = 2))
             } else {
-                dayEvents.take(3).forEach { event ->
+                dayEvents.take(3).forEachIndexed { index, event ->
                     val multiDay = event.isMultiDay()
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
-                    val title = if (!multiDay || segmentStart) event.title.take(8) else " "
-                    cell.addView(TextView(this).text(title).size(8).apply {
+                    val moreText = if (index == 2 && dayEvents.size > 3) " ..." else ""
+                    val title = if (!multiDay || segmentStart) "${event.title.take(if (moreText.isBlank()) 8 else 5)}$moreText" else " "
+                    cell.addView(TextView(this).text(title).size(7).apply {
                         setTextColor(slate900)
                         maxLines = 1
+                        includeFontPadding = false
                         gravity = Gravity.START
                         background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
                         setPadding(3.dp(), 0, 3.dp(), 0)
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 11.dp()).apply {
                         topMargin = 1.dp()
                         if (!multiDay || segmentStart) {
                             leftMargin = 3.dp()
