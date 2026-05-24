@@ -70,6 +70,11 @@ class MainActivity : Activity() {
     private var previousMonthView: View? = null
     private var nextMonthView: View? = null
     private var currentCalendarGrid: GridLayout? = null
+    private var previousCalendarGrid: GridLayout? = null
+    private var nextCalendarGrid: GridLayout? = null
+    private var currentMonthOverlay: MultiDayTitleOverlay? = null
+    private var previousMonthOverlay: MultiDayTitleOverlay? = null
+    private var nextMonthOverlay: MultiDayTitleOverlay? = null
     private var currentEventList: LinearLayout? = null
     private var currentListTitle: TextView? = null
     private var resizeAreaTop = -1
@@ -298,9 +303,12 @@ class MainActivity : Activity() {
         val calendarGrid = calendarGridView()
         val previousGrid = calendarGridView()
         val nextGrid = calendarGridView()
-        val calendarPage = calendarPage(calendarGrid, visibleMonth)
-        val previousPage = calendarPage(previousGrid, visibleMonth.minusMonths(1))
-        val nextPage = calendarPage(nextGrid, visibleMonth.plusMonths(1))
+        val calendarOverlay = MultiDayTitleOverlay(this, visibleMonth)
+        val previousOverlay = MultiDayTitleOverlay(this, visibleMonth.minusMonths(1))
+        val nextOverlay = MultiDayTitleOverlay(this, visibleMonth.plusMonths(1))
+        val calendarPage = calendarPage(calendarGrid, calendarOverlay)
+        val previousPage = calendarPage(previousGrid, previousOverlay)
+        val nextPage = calendarPage(nextGrid, nextOverlay)
         val calendarFrame = FrameLayout(this).apply {
             clipChildren = true
             clipToPadding = true
@@ -393,6 +401,11 @@ class MainActivity : Activity() {
         currentListTitle = listTitle
         activeSwipeViews = listOf(calendarPage, listPanel)
         currentCalendarGrid = calendarGrid
+        previousCalendarGrid = previousGrid
+        nextCalendarGrid = nextGrid
+        currentMonthOverlay = calendarOverlay
+        previousMonthOverlay = previousOverlay
+        nextMonthOverlay = nextOverlay
         currentMonthView = calendarPage
         previousMonthView = previousPage
         nextMonthView = nextPage
@@ -569,7 +582,7 @@ class MainActivity : Activity() {
             .withEndAction {
                 monthTransitionDirection = 0
                 visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
-                showCalendar()
+                redrawMonthPages()
             }
             .start()
     }
@@ -661,12 +674,12 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun calendarPage(grid: GridLayout, month: YearMonth): FrameLayout {
+    private fun calendarPage(grid: GridLayout, overlay: MultiDayTitleOverlay): FrameLayout {
         return FrameLayout(this).apply {
             clipChildren = false
             clipToPadding = false
             addView(grid, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            addView(MultiDayTitleOverlay(this@MainActivity, month), FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(overlay, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         }
     }
 
@@ -680,6 +693,24 @@ class MainActivity : Activity() {
             val date = start.plusDays(index.toLong())
             grid.addView(calendarCellFor(date, month), cellParams(calendarCellHeight()))
         }
+    }
+
+    private fun redrawMonthPages() {
+        val previousGrid = previousCalendarGrid ?: return
+        val currentGrid = currentCalendarGrid ?: return
+        val nextGrid = nextCalendarGrid ?: return
+        calendarEventCache.clear()
+        multiDaySlotCache.clear()
+        val previousMonth = visibleMonth.minusMonths(1)
+        val nextMonth = visibleMonth.plusMonths(1)
+        previousMonthOverlay?.setMonth(previousMonth)
+        currentMonthOverlay?.setMonth(visibleMonth)
+        nextMonthOverlay?.setMonth(nextMonth)
+        drawCalendar(previousGrid, previousMonth)
+        drawCalendar(currentGrid, visibleMonth)
+        drawCalendar(nextGrid, nextMonth)
+        refreshCurrentEventList()
+        resetGestureTransforms()
     }
 
     private fun selectCalendarDate(date: LocalDate) {
@@ -917,7 +948,7 @@ class MainActivity : Activity() {
         return cell
     }
 
-    private inner class MultiDayTitleOverlay(context: Context, private val month: YearMonth) : View(context) {
+    private inner class MultiDayTitleOverlay(context: Context, private var month: YearMonth) : View(context) {
         private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = slate900
             textSize = 8f * resources.displayMetrics.scaledDensity
@@ -926,6 +957,11 @@ class MainActivity : Activity() {
         init {
             isClickable = false
             isFocusable = false
+        }
+
+        fun setMonth(newMonth: YearMonth) {
+            month = newMonth
+            invalidate()
         }
 
         override fun onDraw(canvas: Canvas) {
