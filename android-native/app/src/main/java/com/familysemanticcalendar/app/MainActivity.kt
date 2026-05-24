@@ -938,7 +938,7 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER
                 }
-                realEvents.map { ownerAccentColor(it.createdBy) }.distinct().take(4).forEach { color ->
+                realEvents.mapNotNull { ownerAccentColor(it.createdBy) }.distinct().take(4).forEach { color ->
                     dots.addView(View(this).apply {
                         background = rounded(color, 999.dp())
                     }, LinearLayout.LayoutParams(6.dp(), 6.dp()).apply {
@@ -1019,9 +1019,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = rounded(softCalendarColor(calendarColor(event.calendarId)), if (multiDay) 0 else 4.dp())
-            if (!multiDay || segmentStart) {
+            val accentColor = ownerAccentColor(event.createdBy)
+            if (accentColor != null && (!multiDay || segmentStart)) {
                 addView(View(this@MainActivity).apply {
-                    background = rounded(ownerAccentColor(event.createdBy), if (multiDay) 0 else 3.dp())
+                    background = rounded(accentColor, if (multiDay) 0 else 3.dp())
                 }, LinearLayout.LayoutParams(3.dp(), LinearLayout.LayoutParams.MATCH_PARENT))
             }
             addView(TextView(this@MainActivity).text(title).size(textSize).apply {
@@ -1034,8 +1035,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun ownerAccentColor(ownerId: String?): Int {
-        if (ownerId == null || ownerId == ALL_OWNER_ID) return 0xFF64748B.toInt()
+    private fun ownerAccentColor(ownerId: String?): Int? {
+        if (ownerId == null || ownerId == ALL_OWNER_ID) return null
         return NativeStore.ownerColor(this, ownerId) ?: ownerColor(ownerId)
     }
 
@@ -1120,11 +1121,13 @@ class MainActivity : Activity() {
                 setPadding(0, 10.dp(), 12.dp(), 10.dp())
                 setOnClickListener { showEventDialog(event) }
             }
-            row.addView(View(this).apply {
-                background = rounded(ownerAccentColor(event.createdBy), 4.dp())
-            }, LinearLayout.LayoutParams(5.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
-                rightMargin = 10.dp()
-            })
+            ownerAccentColor(event.createdBy)?.let { accentColor ->
+                row.addView(View(this).apply {
+                    background = rounded(accentColor, 4.dp())
+                }, LinearLayout.LayoutParams(5.dp(), LinearLayout.LayoutParams.MATCH_PARENT).apply {
+                    rightMargin = 10.dp()
+                })
+            } ?: row.setPadding(12.dp(), 10.dp(), 12.dp(), 10.dp())
             val texts = LinearLayout(this).vertical()
             texts.addView(TextView(this).text(event.title).size(15).bold().apply {
                 setTextColor(slate900)
