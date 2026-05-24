@@ -73,15 +73,15 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
         val first = month.atDay(1)
         val start = first.minusDays((first.dayOfWeek.value % 7).toLong())
         val today = LocalDate.now()
-        val titlePaint = textPaint(Color.rgb(15, 118, 110), 38f, bold = true)
-        val weekdayPaint = textPaint(Color.rgb(100, 116, 139), 28f, bold = true).apply { textAlign = Paint.Align.CENTER }
-        val datePaint = textPaint(Color.rgb(15, 23, 42), 24f, bold = false)
-        val holidayPaint = textPaint(Color.rgb(220, 38, 38), 23f, bold = false)
-        val eventPaint = textPaint(Color.rgb(15, 23, 42), 22f, bold = false)
-        val hiddenPaint = textPaint(Color.rgb(71, 85, 105), 22f, bold = true)
+        val titlePaint = textPaint(Color.rgb(15, 118, 110), 40f, bold = true)
+        val weekdayPaint = textPaint(Color.rgb(100, 116, 139), 30f, bold = true).apply { textAlign = Paint.Align.CENTER }
+        val datePaint = textPaint(Color.rgb(15, 23, 42), 26f, bold = false)
+        val holidayPaint = textPaint(Color.rgb(220, 38, 38), 25f, bold = false)
+        val eventPaint = textPaint(Color.rgb(15, 23, 42), 24f, bold = false)
+        val hiddenPaint = textPaint(Color.rgb(71, 85, 105), 24f, bold = true)
         val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(148, 163, 184)
-            strokeWidth = 2.2f
+            color = Color.rgb(226, 232, 240)
+            strokeWidth = 1.2f
             style = Paint.Style.STROKE
         }
         val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -174,13 +174,15 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
             val slotByEventId = widgetMultiDaySlotsForWeek(events, weekStart)
             val weekEvents = (0..6).map { day -> eventsForDate(events, weekStart.plusDays(day.toLong())) }
             val eventTop = gridTop + row * cellHeight + 65f
-            val eventHeight = 24f
+            val eventHeight = 28f
             val eventGap = 4f
             val capacity = ((cellHeight - 72f) / (eventHeight + eventGap)).toInt().coerceAtLeast(1)
+            val reservedCapacityByDay = IntArray(7) { day ->
+                if (weekEvents[day].size > capacity) (capacity - 1).coerceAtLeast(1) else capacity
+            }
             val visibleByDay = IntArray(7)
 
             slotByEventId.entries.sortedBy { it.value }.forEach { (eventId, slot) ->
-                if (slot >= capacity) return@forEach
                 val event = events.firstOrNull { it.id == eventId } ?: return@forEach
                 val eventStart = event.startsAt.toLocalDate()
                 val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
@@ -188,25 +190,31 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                 val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
                 val startCol = segmentStart.dayOfWeek.value % 7
                 val endCol = segmentEnd.dayOfWeek.value % 7
-                val top = eventTop + slot * (eventHeight + eventGap)
-                val left = startCol * cellWidth + 4f
-                val right = (endCol + 1) * cellWidth - 4f
-                drawEventPill(canvas, left, top, right, top + eventHeight, softColor(calendarColor(event.calendarId)), fillPaint)
-                val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
-                if (label.isNotBlank()) {
-                    canvas.drawText(ellipsize(label, eventPaint, right - left - 10f), left + 5f, top + 18f, eventPaint)
+                var rangeStart: Int? = null
+                for (day in startCol..endCol) {
+                    val visible = slot < reservedCapacityByDay[day]
+                    if (visible && rangeStart == null) {
+                        rangeStart = day
+                    } else if (!visible && rangeStart != null) {
+                        drawMultiDaySegment(canvas, event, eventStart, weekStart, rangeStart, day - 1, slot, eventTop, eventHeight, eventGap, cellWidth, eventPaint, fillPaint)
+                        rangeStart = null
+                    }
+                    if (visible) visibleByDay[day] += 1
                 }
-                for (day in startCol..endCol) visibleByDay[day] += 1
+                if (rangeStart != null) {
+                    drawMultiDaySegment(canvas, event, eventStart, weekStart, rangeStart, endCol, slot, eventTop, eventHeight, eventGap, cellWidth, eventPaint, fillPaint)
+                }
             }
 
             repeat(7) { day ->
                 val date = weekStart.plusDays(day.toLong())
                 val dayEvents = weekEvents[day]
                 val singleDayEvents = dayEvents.filterNot { it.isMultiDay() }.toMutableList()
-                val slots = MutableList<EventItem?>(capacity) { null }
+                val reservedCapacity = reservedCapacityByDay[day]
+                val slots = MutableList<EventItem?>(reservedCapacity) { null }
                 dayEvents.filter { it.isMultiDay() }.forEach { event ->
                     val slot = slotByEventId[event.id]
-                    if (slot != null && slot in 0 until capacity) slots[slot] = event
+                    if (slot != null && slot in 0 until reservedCapacity) slots[slot] = event
                 }
                 slots.indices.forEach { index ->
                     if (slots[index] == null && singleDayEvents.isNotEmpty()) {
@@ -215,14 +223,14 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                         val top = eventTop + index * (eventHeight + eventGap)
                         val right = (day + 1) * cellWidth - 4f
                         drawEventPill(canvas, left, top, right, top + eventHeight, softColor(calendarColor(event.calendarId)), fillPaint)
-                        canvas.drawText(ellipsize(event.title, eventPaint, right - left - 8f), left + 5f, top + 18f, eventPaint)
+                        canvas.drawText(ellipsize(event.title, eventPaint, right - left - 8f), left + 5f, top + 21f, eventPaint)
                         visibleByDay[day] += 1
                     }
                 }
                 val hiddenCount = (dayEvents.size - visibleByDay[day]).coerceAtLeast(0)
                 if (hiddenCount > 0) {
-                    val top = eventTop + (capacity - 1) * (eventHeight + eventGap)
-                    canvas.drawText("+$hiddenCount", day * cellWidth + 8f, top + 19f, hiddenPaint)
+                    val top = eventTop + reservedCapacity * (eventHeight + eventGap)
+                    canvas.drawText("+$hiddenCount", day * cellWidth + 8f, top + 21f, hiddenPaint)
                 }
                 if (date.month != month.month) {
                     eventPaint.color = Color.rgb(148, 163, 184)
@@ -236,6 +244,32 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
     private fun drawEventPill(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float, color: Int, paint: Paint) {
         paint.color = color
         canvas.drawRoundRect(RectF(left, top, right, bottom), 3f, 3f, paint)
+    }
+
+    private fun drawMultiDaySegment(
+        canvas: Canvas,
+        event: EventItem,
+        eventStart: LocalDate,
+        weekStart: LocalDate,
+        startCol: Int,
+        endCol: Int,
+        slot: Int,
+        eventTop: Float,
+        eventHeight: Float,
+        eventGap: Float,
+        cellWidth: Float,
+        eventPaint: Paint,
+        fillPaint: Paint,
+    ) {
+        val top = eventTop + slot * (eventHeight + eventGap)
+        val left = startCol * cellWidth + 4f
+        val right = (endCol + 1) * cellWidth - 4f
+        drawEventPill(canvas, left, top, right, top + eventHeight, softColor(calendarColor(event.calendarId)), fillPaint)
+        val segmentDate = weekStart.plusDays(startCol.toLong())
+        val label = if (eventStart == segmentDate || segmentDate == weekStart) event.title else ""
+        if (label.isNotBlank()) {
+            canvas.drawText(ellipsize(label, eventPaint, right - left - 10f), left + 5f, top + 21f, eventPaint)
+        }
     }
 
     private fun widgetMultiDaySlotsForWeek(events: List<EventItem>, weekStart: LocalDate): Map<String, Int> {
