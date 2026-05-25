@@ -9,6 +9,7 @@ dist/
 build/
 .gradle/
 local.properties
+.tools/
 
 .DS_Store
 Thumbs.db
