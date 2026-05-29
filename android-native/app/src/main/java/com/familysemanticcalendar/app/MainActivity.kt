@@ -2237,7 +2237,7 @@ class MainActivity : Activity() {
     }
 
     private fun importKey(title: String, startsAt: LocalDateTime, endsAt: LocalDateTime?): String {
-        return "${title.trim()}|$startsAt|${endsAt ?: ""}"
+        return "${title.filterNot { it.isWhitespace() }.lowercase()}|${startsAt.toLocalDate()}"
     }
 
     private fun showChangePasswordDialog(returnToSettings: Boolean = false) {
