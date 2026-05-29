@@ -17,7 +17,7 @@ import java.time.OffsetDateTime
 import java.time.YearMonth
 import java.time.ZoneId
 
-const val API_BASE_URL = "https://desktop-lnu5cl7.tail96fe59.ts.net"
+const val API_BASE_URL = "https://calendar.jadendev.com"
 
 data class User(val id: String, val displayName: String)
 data class AuthSession(val user: User, val accessToken: String)
