@@ -1339,13 +1339,16 @@ class MainActivity : Activity() {
         })
         val bodyInput = styleInput(EditText(this).apply {
             hint = "설명"
-            textSize = 14f
-            minLines = 5
+            textSize = 13f
+            minLines = 4
+            maxLines = 6
+            minHeight = 112.dp()
             gravity = Gravity.TOP or Gravity.START
             setText(event?.body.orEmpty())
         })
         val locationInput = styleInput(EditText(this).apply {
             hint = "장소"
+            textSize = 13f
             setSingleLine(true)
             setText(event?.location.orEmpty())
         })
@@ -1442,7 +1445,9 @@ class MainActivity : Activity() {
         }, matchWrap(top = 12))
         root.addView(panel {
             addView(titleInput, matchWrap())
-            addView(bodyInput, matchWrap(top = 8))
+            addView(bodyInput, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 112.dp()).apply {
+                topMargin = 8.dp()
+            })
             addView(locationInput, matchWrap(top = 8))
         }, matchWrap(top = 12))
         root.addView(panel {
