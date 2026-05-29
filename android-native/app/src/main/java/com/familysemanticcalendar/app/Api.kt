@@ -228,6 +228,14 @@ object CalendarApi {
         return (0 until array.length()).map { array.getJSONObject(it).toEvent() }
     }
 
+    fun listEvents(calendarId: String, userId: String, startsBefore: LocalDateTime, endsAfter: LocalDateTime): List<EventItem> {
+        val encodedCalendarId = URLEncoder.encode(calendarId, Charsets.UTF_8.name())
+        val before = URLEncoder.encode(startsBefore.toString(), Charsets.UTF_8.name())
+        val after = URLEncoder.encode(endsAfter.toString(), Charsets.UTF_8.name())
+        val array = JSONArray(request("GET", "/events?calendar_id=$encodedCalendarId&starts_before=$before&ends_after=$after", userId = userId))
+        return (0 until array.length()).map { array.getJSONObject(it).toEvent() }
+    }
+
     fun createEvent(
         calendarId: String,
         userId: String,

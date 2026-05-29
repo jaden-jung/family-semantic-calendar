@@ -458,7 +458,12 @@ def delete_event(event_id: str, user: Annotated[dict, Depends(current_user)]):
 
 
 @app.get("/events", response_model=list[EventOut])
-def list_events(calendar_id: str, user: Annotated[dict, Depends(current_user)]):
+def list_events(
+    calendar_id: str,
+    user: Annotated[dict, Depends(current_user)],
+    starts_before: datetime | None = None,
+    ends_after: datetime | None = None,
+):
     assert_member(calendar_id, user["id"])
     with get_conn() as conn:
         return conn.execute(
@@ -466,10 +471,12 @@ def list_events(calendar_id: str, user: Annotated[dict, Depends(current_user)]):
             SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             FROM events
             WHERE calendar_id = %s
+              AND (%s IS NULL OR starts_at < %s)
+              AND (%s IS NULL OR COALESCE(ends_at, starts_at) >= %s)
             ORDER BY starts_at DESC
             LIMIT 5000
             """,
-            (calendar_id,),
+            (calendar_id, starts_before, starts_before, ends_after, ends_after),
         ).fetchall()
 
 

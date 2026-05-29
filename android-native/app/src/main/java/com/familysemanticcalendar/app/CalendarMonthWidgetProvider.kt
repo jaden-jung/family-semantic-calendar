@@ -29,7 +29,13 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                 } else {
                     CalendarApi.accessToken = session!!.accessToken
                     val calendars = CalendarApi.listCalendars(user.id)
-                    val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
+                    val month = YearMonth.now()
+                    val first = month.atDay(1)
+                    val gridStart = first.minusDays((first.dayOfWeek.value % 7).toLong())
+                    val gridEnd = gridStart.plusDays(42)
+                    val events = visibleCalendarsFor(context, calendars).flatMap {
+                        CalendarApi.listEvents(it.id, user.id, gridEnd.atStartOfDay(), gridStart.atStartOfDay())
+                    }
                     WidgetMonthData(events, null)
                 }
             } catch (_: Exception) {
