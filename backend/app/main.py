@@ -467,7 +467,7 @@ def list_events(calendar_id: str, user: Annotated[dict, Depends(current_user)]):
             FROM events
             WHERE calendar_id = %s
             ORDER BY starts_at DESC
-            LIMIT 200
+            LIMIT 5000
             """,
             (calendar_id,),
         ).fetchall()
