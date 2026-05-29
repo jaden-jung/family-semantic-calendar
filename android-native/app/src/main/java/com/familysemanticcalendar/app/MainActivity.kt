@@ -998,7 +998,7 @@ class MainActivity : Activity() {
                     val segmentStart = multiDay && (event.startsAt.toLocalDate() == date || date.dayOfWeek.value == 7)
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val title = when {
-                        !multiDay -> event.title.take(8)
+                        !multiDay -> event.title
                         else -> ""
                     }
                     cell.addView(eventChipView(event, title, eventTextSize, multiDay, segmentStart), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, childHeightDp.dp()).apply {
@@ -1046,6 +1046,7 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).text(title).size(textSize).apply {
                 setTextColor(slate900)
                 maxLines = 1
+                setSingleLine(true)
                 includeFontPadding = false
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(if (!multiDay || segmentStart) 2.dp() else 0, 0, if (multiDay) 0 else 3.dp(), 0)
