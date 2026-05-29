@@ -1352,6 +1352,8 @@ class MainActivity : Activity() {
             setSingleLine(true)
             setText(event?.location.orEmpty())
         })
+        bodyInput.textSize = 13f
+        locationInput.textSize = 13f
 
         fun refreshButtons() {
             dateButton.text = if (timeCheck.isChecked) {
