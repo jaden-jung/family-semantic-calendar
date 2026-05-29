@@ -13,11 +13,13 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
@@ -43,12 +45,16 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.YearMonth
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+
+private const val ICS_IMPORT_REQUEST = 4101
 
 class MainActivity : Activity() {
     private val monthFormatter = DateTimeFormatter.ofPattern("yyyy년 M월")
@@ -87,6 +93,15 @@ class MainActivity : Activity() {
     private var resizeGestureAllowed = false
     private val calendarEventCache = mutableMapOf<LocalDate, List<EventItem?>>()
     private val multiDaySlotCache = mutableMapOf<LocalDate, Map<String, Int>>()
+
+    private data class IcsImportEvent(
+        val title: String,
+        val body: String,
+        val location: String,
+        val startsAt: LocalDateTime,
+        val endsAt: LocalDateTime?,
+        val recurrenceRule: JSONObject?,
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -171,6 +186,13 @@ class MainActivity : Activity() {
             }
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == ICS_IMPORT_REQUEST && resultCode == RESULT_OK) {
+            data?.data?.let { importIcsFromUri(it) }
+        }
     }
 
     private fun authenticateSavedUser(saved: User) {
@@ -1856,6 +1878,7 @@ class MainActivity : Activity() {
         }
         add("내 일정 색상", "달력 일정 앞쪽에 표시되는 내 색상") { showMyOwnerColorDialog(returnToSettings = true) }
         add("검색 임계치 설정", NativeStore.searchMaxDistance(this).toString()) { showSearchThresholdDialog(returnToSettings = true) }
+        add("ICS \uAC00\uC838\uC624\uAE30", "\uB124\uC774\uBC84 \uCE98\uB9B0\uB354 \uBC31\uC5C5 \uD30C\uC77C\uC744 \uD55C \uBC88\uB9CC \uAC00\uC838\uC635\uB2C8\uB2E4") { openIcsImportPicker() }
         add("\uBE44\uBC00\uBC88\uD638 \uBCC0\uACBD", "\uD604\uC7AC \uBE44\uBC00\uBC88\uD638\uB85C \uD655\uC778 \uD6C4 \uBCC0\uACBD") { showChangePasswordDialog(returnToSettings = true) }
         add("\uB85C\uADF8\uC544\uC6C3", "\uC774 \uAE30\uAE30\uC758 \uC790\uB3D9 \uB85C\uADF8\uC778\uC744 \uD574\uC81C") { confirmLogout() }
         add("초대코드로 참여", "가족 달력에 참여") { showJoinCalendarDialog(currentUser, returnToSettings = true) }
@@ -1996,6 +2019,225 @@ class MainActivity : Activity() {
             .create()
         dialog.setOnCancelListener { if (returnToSettings) showCalendarDialog() }
         dialog.show()
+    }
+
+    private fun openIcsImportPicker() {
+        if (calendars.isEmpty()) {
+            toast("\uAC00\uC838\uC62C \uCE98\uB9B0\uB354\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.")
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/calendar", "application/octet-stream", "text/*"))
+        }
+        startActivityForResult(intent, ICS_IMPORT_REQUEST)
+    }
+
+    private fun importIcsFromUri(uri: Uri) {
+        val calendar = calendars.find { it.id == selectedCalendarId } ?: visibleCalendars().firstOrNull() ?: calendars.firstOrNull()
+        if (calendar == null) {
+            toast("\uAC00\uC838\uC62C \uCE98\uB9B0\uB354\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.")
+            return
+        }
+        val parsed = try {
+            val text = contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            parseIcsEvents(text)
+        } catch (error: Exception) {
+            toast(error.message ?: "\uD30C\uC77C\uC744 \uC77D\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.")
+            return
+        }
+        if (parsed.isEmpty()) {
+            toast("\uAC00\uC838\uC62C \uC77C\uC815\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("ICS \uAC00\uC838\uC624\uAE30")
+            .setMessage("${calendar.name}\uC5D0 ${parsed.size}\uAC1C \uC77C\uC815\uC744 \uAC00\uC838\uC62C\uAE4C\uC694?\n\uC911\uBCF5\uB41C \uC77C\uC815\uC740 \uAC74\uB108\uB701\uB2C8\uB2E4.")
+            .setNegativeButton("\uCDE8\uC18C", null)
+            .setPositiveButton("\uAC00\uC838\uC624\uAE30") { _, _ ->
+                importIcsEvents(calendar, parsed)
+            }
+            .show()
+    }
+
+    private fun importIcsEvents(calendar: CalendarItem, parsed: List<IcsImportEvent>) {
+        val currentUser = user ?: return
+        background(
+            work = {
+                val existingKeys = events.map { importKey(it.title, it.startsAt, it.endsAt) }.toMutableSet()
+                var imported = 0
+                var skipped = 0
+                parsed.forEach { item ->
+                    val key = importKey(item.title, item.startsAt, item.endsAt)
+                    if (key in existingKeys) {
+                        skipped += 1
+                    } else {
+                        CalendarApi.createEvent(
+                            calendar.id,
+                            currentUser.id,
+                            item.title,
+                            item.body,
+                            item.location,
+                            item.startsAt,
+                            item.endsAt,
+                            currentUser.id,
+                            item.recurrenceRule,
+                        )
+                        existingKeys.add(key)
+                        imported += 1
+                    }
+                }
+                imported to skipped
+            },
+            done = { (imported, skipped) ->
+                toast("\uAC00\uC838\uC624\uAE30 \uC644\uB8CC: ${imported}\uAC1C, \uC911\uBCF5 ${skipped}\uAC1C")
+                reloadCalendar()
+            },
+        )
+    }
+
+    private fun parseIcsEvents(text: String): List<IcsImportEvent> {
+        val lines = unfoldIcsLines(text)
+        val items = mutableListOf<Map<String, IcsProperty>>()
+        var current: MutableMap<String, IcsProperty>? = null
+        lines.forEach { line ->
+            when (line.trim()) {
+                "BEGIN:VEVENT" -> current = mutableMapOf()
+                "END:VEVENT" -> {
+                    current?.let { items.add(it.toMap()) }
+                    current = null
+                }
+                else -> {
+                    val target = current ?: return@forEach
+                    val property = parseIcsProperty(line) ?: return@forEach
+                    target[property.name] = property
+                }
+            }
+        }
+        return items.mapNotNull { props ->
+            val startProp = props["DTSTART"] ?: return@mapNotNull null
+            val title = props["SUMMARY"]?.value?.icsUnescape()?.trim().orEmpty().ifBlank { "\uC81C\uBAA9 \uC5C6\uB294 \uC77C\uC815" }
+            val allDay = startProp.params.any { it.equals("VALUE=DATE", ignoreCase = true) }
+            val startsAt = parseIcsDateTime(startProp.value, allDay) ?: return@mapNotNull null
+            val endsAt = props["DTEND"]?.let { endProp ->
+                if (allDay) {
+                    parseIcsDate(endProp.value)?.minusDays(1)?.atTime(23, 59)?.takeIf { it.isAfter(startsAt) }
+                } else {
+                    parseIcsDateTime(endProp.value, false)?.takeIf { it != startsAt }
+                }
+            }
+            IcsImportEvent(
+                title = title,
+                body = props["DESCRIPTION"]?.value?.icsUnescape().orEmpty(),
+                location = props["LOCATION"]?.value?.icsUnescape().orEmpty(),
+                startsAt = startsAt,
+                endsAt = endsAt,
+                recurrenceRule = props["RRULE"]?.value?.let { parseIcsRRule(it, startsAt.toLocalDate()) },
+            )
+        }
+    }
+
+    private data class IcsProperty(val name: String, val params: List<String>, val value: String)
+
+    private fun unfoldIcsLines(text: String): List<String> {
+        val result = mutableListOf<String>()
+        text.replace("\r\n", "\n").replace("\r", "\n").lines().forEach { rawLine ->
+            if ((rawLine.startsWith(" ") || rawLine.startsWith("\t")) && result.isNotEmpty()) {
+                result[result.lastIndex] = result.last() + rawLine.drop(1)
+            } else if (rawLine.isNotBlank()) {
+                result.add(rawLine)
+            }
+        }
+        return result
+    }
+
+    private fun parseIcsProperty(line: String): IcsProperty? {
+        val colon = line.indexOf(':')
+        if (colon <= 0) return null
+        val key = line.substring(0, colon)
+        val parts = key.split(';')
+        return IcsProperty(parts.first().uppercase(), parts.drop(1), line.substring(colon + 1))
+    }
+
+    private fun parseIcsDateTime(value: String, allDay: Boolean): LocalDateTime? {
+        if (allDay) return parseIcsDate(value)?.atStartOfDay()
+        val normalized = value.trim()
+        return try {
+            if (normalized.endsWith("Z")) {
+                val instant = Instant.from(DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssX").parse(normalized))
+                LocalDateTime.ofInstant(instant, ZoneId.systemDefault())
+            } else {
+                LocalDateTime.parse(normalized, DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"))
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseIcsDate(value: String): LocalDate? {
+        return try {
+            LocalDate.parse(value.trim(), DateTimeFormatter.BASIC_ISO_DATE)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseIcsRRule(value: String, startDate: LocalDate): JSONObject? {
+        val parts = value.split(';').mapNotNull {
+            val index = it.indexOf('=')
+            if (index <= 0) null else it.substring(0, index).uppercase() to it.substring(index + 1)
+        }.toMap()
+        val interval = parts["INTERVAL"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        return when (parts["FREQ"]?.uppercase()) {
+            "DAILY" -> JSONObject().put("frequency", "daily").put("interval", interval)
+            "WEEKLY" -> JSONObject()
+                .put("frequency", "weekly")
+                .put("interval", interval.coerceIn(1, 3))
+                .put("weekdays", JSONArray(parts["BYDAY"]?.split(',')?.mapNotNull { icsWeekday(it) } ?: listOf(startDate.appWeekday())))
+            "MONTHLY" -> JSONObject()
+                .put("frequency", "monthly")
+                .put("interval", interval)
+                .put("mode", "monthDay")
+                .put("monthDay", startDate.dayOfMonth)
+                .put("weekOfMonth", ((startDate.dayOfMonth - 1) / 7) + 1)
+                .put("weekday", startDate.appWeekday())
+            "YEARLY" -> JSONObject()
+                .put("frequency", "yearly")
+                .put("interval", interval)
+                .put("lunar", false)
+                .put("lunarMonth", startDate.monthValue)
+                .put("lunarDay", startDate.dayOfMonth)
+            else -> null
+        }
+    }
+
+    private fun icsWeekday(value: String): Int? {
+        val day = value.takeLast(2).uppercase()
+        return when (day) {
+            "SU" -> 0
+            "MO" -> 1
+            "TU" -> 2
+            "WE" -> 3
+            "TH" -> 4
+            "FR" -> 5
+            "SA" -> 6
+            else -> null
+        }
+    }
+
+    private fun LocalDate.appWeekday(): Int = if (dayOfWeek.value == 7) 0 else dayOfWeek.value
+
+    private fun String.icsUnescape(): String {
+        return replace("\\n", "\n")
+            .replace("\\N", "\n")
+            .replace("\\,", ",")
+            .replace("\\;", ";")
+            .replace("\\\\", "\\")
+    }
+
+    private fun importKey(title: String, startsAt: LocalDateTime, endsAt: LocalDateTime?): String {
+        return "${title.trim()}|$startsAt|${endsAt ?: ""}"
     }
 
     private fun showChangePasswordDialog(returnToSettings: Boolean = false) {
