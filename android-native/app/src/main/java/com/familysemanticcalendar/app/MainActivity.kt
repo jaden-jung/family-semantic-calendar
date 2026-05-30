@@ -388,7 +388,7 @@ class MainActivity : Activity() {
             selectedDate = LocalDate.now()
             dateSelected = true
             visibleMonth = YearMonth.now()
-            showCalendar()
+            reloadCalendar()
         }
 
         top.addView(today, LinearLayout.LayoutParams(46.dp(), 34.dp()).apply {
@@ -609,7 +609,7 @@ class MainActivity : Activity() {
             monthTransitionDirection = direction
             visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
             dateSelected = false
-            showCalendar()
+            reloadCalendar()
             return
         }
         dateSelected = false
@@ -635,7 +635,7 @@ class MainActivity : Activity() {
                     monthTransitionDirection = 0
                     visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
                     rotateMonthPages(direction)
-                    redrawAdjacentMonthPages()
+                    reloadCalendar()
                 }
             })
             start()
@@ -682,7 +682,7 @@ class MainActivity : Activity() {
             .setPositiveButton("이동") { _, _ ->
                 visibleMonth = YearMonth.of(yearPicker.value, monthPicker.value)
                 dateSelected = false
-                showCalendar()
+                reloadCalendar()
             }
             .show()
     }
@@ -711,13 +711,22 @@ class MainActivity : Activity() {
                 NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
                 NativeStore.saveDefaultCalendarId(this, selectedCalendarId)
                 members = CalendarApi.listUsers(currentUser.id)
-                events = visibleCalendars().flatMap { CalendarApi.listEvents(it.id, currentUser.id) }
+                val eventRange = visibleEventRange()
+                events = visibleCalendars().flatMap {
+                    CalendarApi.listEvents(it.id, currentUser.id, eventRange.second, eventRange.first)
+                }
             },
             done = {
                 refreshWidgets()
                 showCalendar()
             },
         )
+    }
+
+    private fun visibleEventRange(month: YearMonth = visibleMonth): Pair<LocalDateTime, LocalDateTime> {
+        val rangeStart = calendarGridStart(month.minusMonths(1)).atStartOfDay()
+        val rangeEnd = calendarGridStart(month.plusMonths(1)).plusDays(42).atStartOfDay()
+        return rangeStart to rangeEnd
     }
 
     private fun calendarGridView(): GridLayout {
@@ -826,7 +835,7 @@ class MainActivity : Activity() {
             refreshCurrentEventList()
         } else {
             visibleMonth = targetMonth
-            showCalendar()
+            reloadCalendar()
         }
     }
 
@@ -1704,7 +1713,7 @@ class MainActivity : Activity() {
                     listExpanded = false
                     listHidden = false
                     dialog.dismiss()
-                    showCalendar()
+                    reloadCalendar()
                 }, matchWrap(top = 8))
             }
         }
@@ -1763,7 +1772,7 @@ class MainActivity : Activity() {
                 listExpanded = false
                 listHidden = false
                 dialog.dismiss()
-                showCalendar()
+                reloadCalendar()
             }, matchWrap(top = 8))
         }
         content.addView(resultList, matchWrap(top = 12))
