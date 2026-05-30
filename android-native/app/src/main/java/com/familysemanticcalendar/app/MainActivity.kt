@@ -93,6 +93,8 @@ class MainActivity : Activity() {
     private var resizeGestureAllowed = false
     private val calendarEventCache = mutableMapOf<LocalDate, List<EventItem?>>()
     private val multiDaySlotCache = mutableMapOf<LocalDate, Map<String, Int>>()
+    private val visibleEventCache = linkedMapOf<String, List<EventItem>>()
+    private var eventLoadVersion = 0
 
     private data class IcsImportEvent(
         val title: String,
@@ -222,6 +224,7 @@ class MainActivity : Activity() {
 
     private fun enterCalendar(foundUser: User) {
         user = foundUser
+        clearVisibleEventCache()
         showCalendar(loading = true)
         reloadCalendar()
     }
@@ -715,10 +718,7 @@ class MainActivity : Activity() {
                 NativeStore.saveVisibleCalendarIds(this, visibleCalendarIds)
                 NativeStore.saveDefaultCalendarId(this, selectedCalendarId)
                 members = CalendarApi.listUsers(currentUser.id)
-                val eventRange = visibleEventRange()
-                events = visibleCalendars().flatMap {
-                    CalendarApi.listEvents(it.id, currentUser.id, eventRange.second, eventRange.first)
-                }
+                events = loadVisibleEvents(currentUser.id)
             },
             done = {
                 refreshWidgets()
@@ -733,17 +733,47 @@ class MainActivity : Activity() {
             reloadCalendar()
             return
         }
+        val targetMonth = visibleMonth
+        val cacheKey = visibleEventsCacheKey(targetMonth)
+        visibleEventCache[cacheKey]?.let { cachedEvents ->
+            events = cachedEvents
+            redrawAdjacentMonthPages()
+        }
+        val requestVersion = ++eventLoadVersion
         background(
             work = {
-                val eventRange = visibleEventRange()
-                events = visibleCalendars().flatMap {
-                    CalendarApi.listEvents(it.id, currentUser.id, eventRange.second, eventRange.first)
+                loadVisibleEvents(currentUser.id, targetMonth)
+            },
+            done = { loadedEvents ->
+                if (requestVersion == eventLoadVersion && visibleMonth == targetMonth) {
+                    events = loadedEvents
+                    redrawAdjacentMonthPages()
                 }
             },
-            done = {
-                redrawAdjacentMonthPages()
-            },
         )
+    }
+
+    private fun loadVisibleEvents(userId: String, month: YearMonth = visibleMonth): List<EventItem> {
+        val cacheKey = visibleEventsCacheKey(month)
+        val eventRange = visibleEventRange(month)
+        val loadedEvents = visibleCalendars().flatMap {
+            CalendarApi.listEvents(it.id, userId, eventRange.second, eventRange.first)
+        }
+        visibleEventCache[cacheKey] = loadedEvents
+        while (visibleEventCache.size > 8) {
+            visibleEventCache.remove(visibleEventCache.keys.first())
+        }
+        return loadedEvents
+    }
+
+    private fun visibleEventsCacheKey(month: YearMonth = visibleMonth): String {
+        val currentUserId = user?.id.orEmpty()
+        return "${currentUserId}|${month}|${visibleCalendarIds.sorted().joinToString(",")}"
+    }
+
+    private fun clearVisibleEventCache() {
+        visibleEventCache.clear()
+        eventLoadVersion += 1
     }
 
     private fun visibleEventRange(month: YearMonth = visibleMonth): Pair<LocalDateTime, LocalDateTime> {
@@ -1576,6 +1606,7 @@ class MainActivity : Activity() {
                         visibleMonth = YearMonth.from(date)
                         listExpanded = false
                         listHidden = false
+                        clearVisibleEventCache()
                         reloadCalendar()
                     },
                 )
@@ -1591,6 +1622,7 @@ class MainActivity : Activity() {
                                 work = { CalendarApi.deleteEvent(event.id, currentUser.id) },
                                 done = {
                                     dialog.dismiss()
+                                    clearVisibleEventCache()
                                     reloadCalendar()
                                 },
                             )
@@ -2135,6 +2167,7 @@ class MainActivity : Activity() {
             },
             done = { (imported, skipped) ->
                 toast("\uAC00\uC838\uC624\uAE30 \uC644\uB8CC: ${imported}\uAC1C, \uC911\uBCF5 ${skipped}\uAC1C")
+                clearVisibleEventCache()
                 reloadCalendar()
             },
         )
