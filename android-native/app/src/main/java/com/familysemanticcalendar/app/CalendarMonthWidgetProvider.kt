@@ -11,6 +11,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.util.Log
 import android.widget.RemoteViews
 import java.time.LocalDate
 import java.time.YearMonth
@@ -38,8 +39,9 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                     }
                     WidgetMonthData(events, null)
                 }
-            } catch (_: Exception) {
-                WidgetMonthData(emptyList(), "달력을 불러오지 못함")
+            } catch (error: Exception) {
+                Log.e("CalendarMonthWidget", "Failed to load calendar widget", error)
+                WidgetMonthData(emptyList(), "위젯 오류: ${error.javaClass.simpleName}")
             }
             appWidgetIds.forEach { widgetId ->
                 render(context, appWidgetManager, widgetId, monthTitle(), result.events, isLoading = false, status = result.status)
