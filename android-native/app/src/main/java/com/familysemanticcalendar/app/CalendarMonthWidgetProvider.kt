@@ -13,6 +13,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.Log
 import android.widget.RemoteViews
+import java.io.IOException
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -29,15 +30,17 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                     WidgetMonthData(emptyList(), "로그인이 필요합니다")
                 } else {
                     CalendarApi.accessToken = session!!.accessToken
-                    val calendars = CalendarApi.listCalendars(user.id)
-                    val month = YearMonth.now()
-                    val first = month.atDay(1)
-                    val gridStart = first.minusDays((first.dayOfWeek.value % 7).toLong())
-                    val gridEnd = gridStart.plusDays(42)
-                    val events = visibleCalendarsFor(context, calendars).flatMap {
-                        CalendarApi.listEvents(it.id, user.id, gridEnd.atStartOfDay(), gridStart.atStartOfDay())
+                    retryWidgetNetwork {
+                        val calendars = CalendarApi.listCalendars(user.id)
+                        val month = YearMonth.now()
+                        val first = month.atDay(1)
+                        val gridStart = first.minusDays((first.dayOfWeek.value % 7).toLong())
+                        val gridEnd = gridStart.plusDays(42)
+                        val events = visibleCalendarsFor(context, calendars).flatMap {
+                            CalendarApi.listEvents(it.id, user.id, gridEnd.atStartOfDay(), gridStart.atStartOfDay())
+                        }
+                        WidgetMonthData(events, null)
                     }
-                    WidgetMonthData(events, null)
                 }
             } catch (error: Exception) {
                 Log.e("CalendarMonthWidget", "Failed to load calendar widget", error)
@@ -47,6 +50,20 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                 render(context, appWidgetManager, widgetId, monthTitle(), result.events, isLoading = false, status = result.status)
             }
         }.start()
+    }
+
+    private fun retryWidgetNetwork(work: () -> WidgetMonthData): WidgetMonthData {
+        var lastError: IOException? = null
+        repeat(3) { attempt ->
+            try {
+                return work()
+            } catch (error: IOException) {
+                lastError = error
+                Log.w("CalendarMonthWidget", "Retryable widget network failure: ${error.javaClass.simpleName}", error)
+                if (attempt < 2) Thread.sleep(1500L * (attempt + 1))
+            }
+        }
+        throw lastError ?: IOException("Widget network request failed")
     }
 
     private fun monthTitle(): String {
