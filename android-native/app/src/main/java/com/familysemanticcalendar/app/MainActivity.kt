@@ -1056,6 +1056,7 @@ class MainActivity : Activity() {
                     val weekStart = date.minusDays(date.dayOfWeek.value % 7L)
                     val title = when {
                         !multiDay -> event.title
+                        segmentStart -> event.title
                         else -> ""
                     }
                     cell.addView(eventChipView(event, title, eventTextSize, multiDay, segmentStart), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, childHeightDp.dp()).apply {
@@ -1138,38 +1139,6 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            if (listExpanded || width <= 0 || height <= 0) return
-            val eventTopOffset = (if (listExpanded) 3 else 2).dp() + 14.dp()
-            val rowHeight = 12.dp().toFloat()
-            val childHeight = 11.dp().toFloat()
-            val start = calendarGridStart(month)
-
-            repeat(6) { row ->
-                val weekStart = start.plusDays((row * 7).toLong())
-                val slotByEventId = multiDaySlotsForWeek(weekStart)
-                slotByEventId.entries.sortedBy { it.value }.forEach { (eventId, slot) ->
-                    val event = events.firstOrNull { it.id == eventId } ?: return@forEach
-                    val eventStart = event.startsAt.toLocalDate()
-                    val eventEnd = event.endsAt?.toLocalDate() ?: eventStart
-                    val segmentStart = maxOf(eventStart, weekStart)
-                    val segmentEnd = minOf(eventEnd, weekStart.plusDays(6))
-                    if (segmentEnd.isBefore(segmentStart)) return@forEach
-                    val startCol = segmentStart.dayOfWeek.value % 7
-                    val endCol = segmentEnd.dayOfWeek.value % 7
-                    val startCell = grid.getChildAt(7 + row * 7 + startCol) ?: return@forEach
-                    val endCell = grid.getChildAt(7 + row * 7 + endCol) ?: return@forEach
-                    if (startCell.height <= 0 || endCell.height <= 0) return@forEach
-                    val left = startCell.left.toFloat() + 6.dp()
-                    val right = endCell.right.toFloat() - 4.dp()
-                    val top = startCell.top.toFloat() + eventTopOffset + slot * rowHeight
-                    val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
-                    if (label.isBlank()) return@forEach
-                    val save = canvas.save()
-                    canvas.clipRect(left + 5.dp(), top, right, top + childHeight)
-                    canvas.drawText(label, left + 5.dp(), top + 9.dp(), titlePaint)
-                    canvas.restoreToCount(save)
-                }
-            }
         }
     }
 
