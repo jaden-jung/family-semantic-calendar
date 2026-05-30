@@ -19,13 +19,10 @@ import java.time.YearMonth
 
 class CalendarMonthWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        appWidgetIds.forEach { widgetId ->
-            render(context, appWidgetManager, widgetId, monthTitle(), emptyList(), isLoading = true)
-        }
         Thread {
             val session = NativeStore.savedSession(context)
             val user = session?.user
-            val result = try {
+            val result: WidgetMonthData? = try {
                 if (user == null) {
                     WidgetMonthData(emptyList(), "로그인이 필요합니다")
                 } else {
@@ -42,12 +39,17 @@ class CalendarMonthWidgetProvider : AppWidgetProvider() {
                         WidgetMonthData(events, null)
                     }
                 }
+            } catch (error: IOException) {
+                Log.w("CalendarMonthWidget", "Keeping previous widget after transient network failure", error)
+                null
             } catch (error: Exception) {
                 Log.e("CalendarMonthWidget", "Failed to load calendar widget", error)
                 WidgetMonthData(emptyList(), "위젯 오류: ${error.javaClass.simpleName}")
             }
-            appWidgetIds.forEach { widgetId ->
-                render(context, appWidgetManager, widgetId, monthTitle(), result.events, isLoading = false, status = result.status)
+            if (result != null) {
+                appWidgetIds.forEach { widgetId ->
+                    render(context, appWidgetManager, widgetId, monthTitle(), result.events, isLoading = false, status = result.status)
+                }
             }
         }.start()
     }
