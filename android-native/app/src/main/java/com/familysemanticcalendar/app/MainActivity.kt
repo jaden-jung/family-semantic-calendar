@@ -1137,7 +1137,7 @@ class MainActivity : Activity() {
             if (listExpanded || width <= 0 || height <= 0) return
             val headerHeight = 32.dp().toFloat()
             val cellWidth = width / 7f
-            val cellHeight = calendarCellHeight().dp().toFloat()
+            val cellHeight = ((height - headerHeight) / 6f).coerceAtLeast(1f)
             val eventTopOffset = (if (listExpanded) 3 else 2).dp() + 14.dp()
             val rowHeight = 12.dp().toFloat()
             val childHeight = 11.dp().toFloat()
