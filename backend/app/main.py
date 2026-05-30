@@ -471,8 +471,13 @@ def list_events(
             SELECT id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             FROM events
             WHERE calendar_id = %s
-              AND (%s::timestamptz IS NULL OR starts_at < %s::timestamptz)
-              AND (%s::timestamptz IS NULL OR COALESCE(ends_at, starts_at) >= %s::timestamptz)
+              AND (
+                  recurrence_rule IS NOT NULL
+                  OR (
+                      (%s::timestamptz IS NULL OR starts_at < %s::timestamptz)
+                      AND (%s::timestamptz IS NULL OR COALESCE(ends_at, starts_at) >= %s::timestamptz)
+                  )
+              )
             ORDER BY starts_at DESC
             LIMIT 5000
             """,
