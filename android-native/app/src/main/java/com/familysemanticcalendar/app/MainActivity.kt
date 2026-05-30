@@ -788,6 +788,8 @@ class MainActivity : Activity() {
         val nextGrid = nextCalendarGrid ?: return
         val previousMonth = visibleMonth.minusMonths(1)
         val nextMonth = visibleMonth.plusMonths(1)
+        calendarEventCache.clear()
+        multiDaySlotCache.clear()
         currentMonthTitle?.text = visibleMonth.format(monthFormatter)
         previousMonthOverlay?.setMonth(previousMonth)
         currentMonthOverlay?.setMonth(visibleMonth)
