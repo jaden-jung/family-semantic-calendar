@@ -23,7 +23,10 @@ class CalendarWidgetProvider : AppWidgetProvider() {
                     CalendarApi.accessToken = session!!.accessToken
                     val calendars = CalendarApi.listCalendars(user.id)
                     val members = CalendarApi.listUsers(user.id)
-                    val events = visibleCalendarsFor(context, calendars).flatMap { CalendarApi.listEvents(it.id, user.id) }
+                    val today = LocalDate.now()
+                    val events = visibleCalendarsFor(context, calendars).flatMap {
+                        CalendarApi.listEvents(it.id, user.id, today.plusDays(8).atStartOfDay(), today.atStartOfDay())
+                    }
                     appWidgetIds.associateWith { widgetId ->
                         val options = appWidgetManager.getAppWidgetOptions(widgetId)
                         val maxItems = if (options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 110) >= 180) 8 else 4

@@ -388,7 +388,8 @@ class MainActivity : Activity() {
             selectedDate = LocalDate.now()
             dateSelected = true
             visibleMonth = YearMonth.now()
-            reloadCalendar()
+            showCalendar()
+            reloadVisibleEvents()
         }
 
         top.addView(today, LinearLayout.LayoutParams(46.dp(), 34.dp()).apply {
@@ -609,7 +610,8 @@ class MainActivity : Activity() {
             monthTransitionDirection = direction
             visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
             dateSelected = false
-            reloadCalendar()
+            showCalendar()
+            reloadVisibleEvents()
             return
         }
         dateSelected = false
@@ -635,7 +637,8 @@ class MainActivity : Activity() {
                     monthTransitionDirection = 0
                     visibleMonth = if (direction > 0) visibleMonth.plusMonths(1) else visibleMonth.minusMonths(1)
                     rotateMonthPages(direction)
-                    reloadCalendar()
+                    redrawAdjacentMonthPages()
+                    reloadVisibleEvents()
                 }
             })
             start()
@@ -682,7 +685,8 @@ class MainActivity : Activity() {
             .setPositiveButton("이동") { _, _ ->
                 visibleMonth = YearMonth.of(yearPicker.value, monthPicker.value)
                 dateSelected = false
-                reloadCalendar()
+                showCalendar()
+                reloadVisibleEvents()
             }
             .show()
     }
@@ -719,6 +723,25 @@ class MainActivity : Activity() {
             done = {
                 refreshWidgets()
                 showCalendar()
+            },
+        )
+    }
+
+    private fun reloadVisibleEvents() {
+        val currentUser = user ?: return
+        if (calendars.isEmpty()) {
+            reloadCalendar()
+            return
+        }
+        background(
+            work = {
+                val eventRange = visibleEventRange()
+                events = visibleCalendars().flatMap {
+                    CalendarApi.listEvents(it.id, currentUser.id, eventRange.second, eventRange.first)
+                }
+            },
+            done = {
+                redrawAdjacentMonthPages()
             },
         )
     }
@@ -760,6 +783,7 @@ class MainActivity : Activity() {
     }
 
     private fun redrawAdjacentMonthPages() {
+        val currentGrid = currentCalendarGrid ?: return
         val previousGrid = previousCalendarGrid ?: return
         val nextGrid = nextCalendarGrid ?: return
         val previousMonth = visibleMonth.minusMonths(1)
@@ -769,6 +793,7 @@ class MainActivity : Activity() {
         currentMonthOverlay?.setMonth(visibleMonth)
         nextMonthOverlay?.setMonth(nextMonth)
         drawCalendar(previousGrid, previousMonth)
+        drawCalendar(currentGrid, visibleMonth)
         drawCalendar(nextGrid, nextMonth)
         refreshCurrentEventList()
         currentMonthView?.apply {
@@ -835,7 +860,8 @@ class MainActivity : Activity() {
             refreshCurrentEventList()
         } else {
             visibleMonth = targetMonth
-            reloadCalendar()
+            showCalendar()
+            reloadVisibleEvents()
         }
     }
 
@@ -1713,7 +1739,8 @@ class MainActivity : Activity() {
                     listExpanded = false
                     listHidden = false
                     dialog.dismiss()
-                    reloadCalendar()
+                    showCalendar()
+                    reloadVisibleEvents()
                 }, matchWrap(top = 8))
             }
         }
@@ -1772,7 +1799,8 @@ class MainActivity : Activity() {
                 listExpanded = false
                 listHidden = false
                 dialog.dismiss()
-                reloadCalendar()
+                showCalendar()
+                reloadVisibleEvents()
             }, matchWrap(top = 8))
         }
         content.addView(resultList, matchWrap(top = 12))
