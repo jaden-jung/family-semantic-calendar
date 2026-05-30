@@ -348,9 +348,9 @@ class MainActivity : Activity() {
         val calendarGrid = calendarGridView()
         val previousGrid = calendarGridView()
         val nextGrid = calendarGridView()
-        val calendarOverlay = MultiDayTitleOverlay(this, visibleMonth)
-        val previousOverlay = MultiDayTitleOverlay(this, visibleMonth.minusMonths(1))
-        val nextOverlay = MultiDayTitleOverlay(this, visibleMonth.plusMonths(1))
+        val calendarOverlay = MultiDayTitleOverlay(this, visibleMonth, calendarGrid)
+        val previousOverlay = MultiDayTitleOverlay(this, visibleMonth.minusMonths(1), previousGrid)
+        val nextOverlay = MultiDayTitleOverlay(this, visibleMonth.plusMonths(1), nextGrid)
         val calendarPage = calendarPage(calendarGrid, calendarOverlay)
         val previousPage = calendarPage(previousGrid, previousOverlay)
         val nextPage = calendarPage(nextGrid, nextOverlay)
@@ -1116,7 +1116,11 @@ class MainActivity : Activity() {
         return NativeStore.ownerColor(this, ownerId) ?: ownerColor(ownerId)
     }
 
-    private inner class MultiDayTitleOverlay(context: Context, private var month: YearMonth) : View(context) {
+    private inner class MultiDayTitleOverlay(
+        context: Context,
+        private var month: YearMonth,
+        private val grid: GridLayout,
+    ) : View(context) {
         private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = slate900
             textSize = 8f * resources.displayMetrics.scaledDensity
@@ -1135,9 +1139,6 @@ class MainActivity : Activity() {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             if (listExpanded || width <= 0 || height <= 0) return
-            val headerHeight = 32.dp().toFloat()
-            val cellWidth = width / 7f
-            val cellHeight = ((height - headerHeight) / 6f).coerceAtLeast(1f)
             val eventTopOffset = (if (listExpanded) 3 else 2).dp() + 14.dp()
             val rowHeight = 12.dp().toFloat()
             val childHeight = 11.dp().toFloat()
@@ -1155,9 +1156,12 @@ class MainActivity : Activity() {
                     if (segmentEnd.isBefore(segmentStart)) return@forEach
                     val startCol = segmentStart.dayOfWeek.value % 7
                     val endCol = segmentEnd.dayOfWeek.value % 7
-                    val left = startCol * cellWidth + 6.dp()
-                    val right = (endCol + 1) * cellWidth - 4.dp()
-                    val top = headerHeight + row * cellHeight + eventTopOffset + slot * rowHeight
+                    val startCell = grid.getChildAt(7 + row * 7 + startCol) ?: return@forEach
+                    val endCell = grid.getChildAt(7 + row * 7 + endCol) ?: return@forEach
+                    if (startCell.height <= 0 || endCell.height <= 0) return@forEach
+                    val left = startCell.left.toFloat() + 6.dp()
+                    val right = endCell.right.toFloat() - 4.dp()
+                    val top = startCell.top.toFloat() + eventTopOffset + slot * rowHeight
                     val label = if (eventStart == segmentStart || segmentStart == weekStart) event.title else ""
                     if (label.isBlank()) return@forEach
                     val save = canvas.save()
