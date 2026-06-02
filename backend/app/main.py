@@ -9,6 +9,7 @@ import secrets
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from typing_extensions import Annotated
 
 from app.config import Settings, get_settings
@@ -147,6 +148,41 @@ def assert_member(calendar_id, user_id) -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/.well-known/assetlinks.json")
+def android_asset_links() -> list[dict]:
+    return [
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": "com.familysemanticcalendar.nativeapp",
+                "sha256_cert_fingerprints": [
+                    "FE:66:94:32:F8:25:7D:CD:9B:39:BE:69:B1:3E:A0:FD:29:03:12:B7:37:AA:D7:55:39:E4:BF:E8:1F:9D:0E:EB",
+                ],
+            },
+        },
+    ]
+
+
+@app.get("/open", response_class=HTMLResponse)
+def open_app_page() -> str:
+    return """
+    <!doctype html>
+    <html lang="ko">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Family Calendar</title>
+      </head>
+      <body style="font-family: sans-serif; padding: 24px; line-height: 1.5;">
+        <h1>Family Calendar</h1>
+        <p>앱이 설치되어 있다면 이 링크는 캘린더 앱으로 열립니다.</p>
+        <p>앱이 열리지 않으면 최신 APK를 설치한 뒤 다시 눌러주세요.</p>
+      </body>
+    </html>
+    """
 
 
 @app.post("/users", response_model=AuthOut)
