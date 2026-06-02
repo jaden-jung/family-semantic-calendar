@@ -51,12 +51,7 @@ def send_tomorrow_notification(settings: Settings, target_date: date | None = No
     events = tomorrow_events(target, timezone)
     message = summarize_events(settings, target, events)
     for chat_id in chat_ids:
-        try:
-            image = build_notification_card(target, events)
-            send_telegram_photo(settings.telegram_bot_token, chat_id, image, plain_caption(target, events))
-        except Exception as error:
-            print(f"telegram photo failed: {error}")
-            send_telegram_message(settings.telegram_bot_token, chat_id, message)
+        send_telegram_message(settings.telegram_bot_token, chat_id, message, settings.app_open_url)
     mark_notification_sent(target)
     return {"status": "sent", "date": target.isoformat(), "events": len(events), "chats": len(chat_ids)}
 
@@ -140,7 +135,7 @@ def occurs_on(row: dict, target: date, timezone: ZoneInfo) -> bool:
 
 
 def summarize_events(settings: Settings, target: date, events: list[dict]) -> str:
-    fallback = build_html_summary(target, events)
+    fallback = build_table_summary(target, events)
     if not settings.notification_use_llm or not settings.openai_api_key or not events:
         return fallback
     try:
@@ -193,6 +188,50 @@ def build_html_summary(target: date, events: list[dict]) -> str:
         lines.extend(["", "<b>확인 필요</b>"])
         lines.extend(f"- {html.escape(warning)}" for warning in warnings)
     return "\n".join(lines)
+
+
+def build_table_summary(target: date, events: list[dict]) -> str:
+    weekday = "월화수목금토일"[target.weekday()]
+    header = f"<b>{target.month}월 {target.day}일 {weekday}요일 내일 일정</b>"
+    if not events:
+        return f"{header}\n\n등록된 일정이 없습니다."
+
+    lines = [
+        header,
+        f"총 <b>{len(events)}개</b> 일정이 있습니다.",
+        "",
+        "<pre>",
+        "시간        일정              담당",
+        "────────────────────────────",
+    ]
+    for event in events:
+        lines.append(table_row(event_time_text(event), event["title"], event["owner_name"]))
+        if event["location"]:
+            lines.append(table_note("장소", event["location"]))
+        if event["body"]:
+            lines.append(table_note("메모", event["body"]))
+    lines.append("</pre>")
+
+    warnings = event_warnings(events)
+    if warnings:
+        lines.extend(["", "<b>확인 필요</b>"])
+        lines.extend(f"- {html.escape(warning)}" for warning in warnings)
+    return "\n".join(lines)
+
+
+def table_row(time_text: str, title: str, owner: str) -> str:
+    return html.escape(f"{clip_text(time_text, 10):<10} {clip_text(title, 14):<14} {clip_text(owner, 6)}")
+
+
+def table_note(label: str, value: str) -> str:
+    return html.escape(f"{'':<10} {label}: {clip_text(value, 22)}")
+
+
+def clip_text(value: str, limit: int) -> str:
+    value = " ".join(str(value).split())
+    if len(value) <= limit:
+        return value
+    return value[: max(1, limit - 1)] + "…"
 
 
 def format_html_event(event: dict) -> list[str]:
@@ -416,9 +455,14 @@ def send_telegram_photo(token: str, chat_id: str, image: bytes, caption: str) ->
         raise RuntimeError(error.read().decode("utf-8", errors="replace")) from error
 
 
-def send_telegram_message(token: str, chat_id: str, text: str) -> None:
+def send_telegram_message(token: str, chat_id: str, text: str, app_open_url: str | None = None) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if app_open_url:
+        data["reply_markup"] = {
+            "inline_keyboard": [[{"text": "앱 열기", "url": app_open_url}]],
+        }
+    payload = json.dumps(data).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=15) as response:

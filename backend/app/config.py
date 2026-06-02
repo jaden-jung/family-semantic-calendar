@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     notification_timezone: str = "Asia/Seoul"
     notification_use_llm: bool = True
     openai_summary_model: str = "gpt-4o-mini"
+    app_open_url: str = "https://calendar.jadendev.com/open"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
