@@ -51,7 +51,12 @@ def send_tomorrow_notification(settings: Settings, target_date: date | None = No
     events = tomorrow_events(target, timezone)
     message = summarize_events(settings, target, events)
     for chat_id in chat_ids:
-        send_telegram_message(settings.telegram_bot_token, chat_id, message)
+        try:
+            image = build_notification_card(target, events)
+            send_telegram_photo(settings.telegram_bot_token, chat_id, image, plain_caption(target, events))
+        except Exception as error:
+            print(f"telegram photo failed: {error}")
+            send_telegram_message(settings.telegram_bot_token, chat_id, message)
     mark_notification_sent(target)
     return {"status": "sent", "date": target.isoformat(), "events": len(events), "chats": len(chat_ids)}
 
@@ -234,6 +239,181 @@ def event_warnings(events: list[dict]) -> list[str]:
         if registered_hour >= 22 and any(marker in text for marker in ("2시", "두시", "오후 2시")):
             warnings.append(f"'{event['title']}' 일정은 등록 시간은 {event['starts_at'].strftime('%H:%M')}인데 제목/메모에는 2시가 있습니다.")
     return warnings
+
+
+def build_notification_card(target: date, events: list[dict]) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    width = 1080
+    margin = 56
+    card_gap = 22
+    weekday = "월화수목금토일"[target.weekday()]
+    fonts = notification_fonts(ImageFont)
+    rows = []
+    for event in events:
+        title_lines = wrap_text(event["title"], fonts["title"], width - 300)
+        detail_parts = [f"{event['calendar_name']} · {event['owner_name']}"]
+        if event["location"]:
+            detail_parts.append(f"장소: {event['location']}")
+        if event["body"]:
+            detail_parts.append(f"메모: {event['body']}")
+        detail_lines = []
+        for detail in detail_parts:
+            detail_lines.extend(wrap_text(detail, fonts["detail"], width - 300))
+        height = 110 + (len(title_lines) - 1) * 34 + len(detail_lines) * 29
+        rows.append((event, title_lines, detail_lines, max(150, height)))
+
+    warnings = event_warnings(events)
+    warning_lines = []
+    for warning in warnings:
+        warning_lines.extend(wrap_text(warning, fonts["detail"], width - margin * 2 - 54))
+
+    height = 210 + sum(row[3] + card_gap for row in rows)
+    if not rows:
+        height += 180
+    if warning_lines:
+        height += 72 + len(warning_lines) * 32
+    height += 50
+
+    image = Image.new("RGB", (width, height), "#F5F8F7")
+    draw = ImageDraw.Draw(image)
+
+    draw.text((margin, 48), "내일 일정", fill="#0F766E", font=fonts["eyebrow"])
+    draw.text((margin, 84), f"{target.month}월 {target.day}일 {weekday}요일", fill="#0F172A", font=fonts["header"])
+    count_text = "등록된 일정이 없습니다." if not events else f"총 {len(events)}개 일정이 있습니다."
+    draw.text((margin, 145), count_text, fill="#64748B", font=fonts["body"])
+
+    y = 210
+    if not rows:
+        draw_round_rect(draw, (margin, y, width - margin, y + 150), 28, "#FFFFFF", "#DDE7E3")
+        draw.text((margin + 34, y + 50), "내일은 비어 있습니다.", fill="#334155", font=fonts["title"])
+        draw.text((margin + 34, y + 92), "가볍게 넘어가도 되는 날입니다.", fill="#64748B", font=fonts["detail"])
+        y += 174
+
+    for event, title_lines, detail_lines, row_height in rows:
+        x1, y1, x2, y2 = margin, y, width - margin, y + row_height
+        owner_color = owner_accent(event["owner_name"])
+        draw_round_rect(draw, (x1, y1, x2, y2), 28, "#FFFFFF", "#DDE7E3")
+        draw.rounded_rectangle((x1, y1, x1 + 14, y2), radius=7, fill=owner_color)
+        draw.rounded_rectangle((x1 + 34, y1 + 30, x1 + 158, y1 + 72), radius=21, fill="#ECFDF5")
+        draw.text((x1 + 53, y1 + 38), event_time_text(event), fill="#047857", font=fonts["time"])
+
+        text_x = x1 + 190
+        text_y = y1 + 26
+        for line in title_lines:
+            draw.text((text_x, text_y), line, fill="#111827", font=fonts["title"])
+            text_y += 36
+        text_y += 6
+        for line in detail_lines:
+            draw.text((text_x, text_y), line, fill="#64748B", font=fonts["detail"])
+            text_y += 30
+        y += row_height + card_gap
+
+    if warning_lines:
+        box_height = 68 + len(warning_lines) * 32
+        draw_round_rect(draw, (margin, y, width - margin, y + box_height), 24, "#FFF7ED", "#FDBA74")
+        draw.text((margin + 28, y + 24), "확인 필요", fill="#9A3412", font=fonts["warning"])
+        line_y = y + 68
+        for line in warning_lines:
+            draw.text((margin + 28, line_y), line, fill="#9A3412", font=fonts["detail"])
+            line_y += 32
+
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def notification_fonts(image_font):
+    regular_path = find_font_path(False)
+    bold_path = find_font_path(True) or regular_path
+    return {
+        "eyebrow": image_font.truetype(bold_path, 30),
+        "header": image_font.truetype(bold_path, 54),
+        "body": image_font.truetype(regular_path, 31),
+        "time": image_font.truetype(bold_path, 24),
+        "title": image_font.truetype(bold_path, 34),
+        "detail": image_font.truetype(regular_path, 26),
+        "warning": image_font.truetype(bold_path, 30),
+    }
+
+
+def find_font_path(bold: bool) -> str:
+    from pathlib import Path
+
+    candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/opentype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc" if bold else "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "C:/Windows/Fonts/malgunbd.ttf" if bold else "C:/Windows/Fonts/malgun.ttf",
+    ]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError("No Korean font found")
+
+
+def wrap_text(text: str, font, max_width: int) -> list[str]:
+    if not text:
+        return []
+    lines = []
+    current = ""
+    for char in text:
+        candidate = current + char
+        if font.getlength(candidate) <= max_width or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = char
+    if current:
+        lines.append(current)
+    return lines
+
+
+def draw_round_rect(draw, box, radius: int, fill: str, outline: str) -> None:
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=2)
+
+
+def owner_accent(owner_name: str) -> str:
+    palette = ["#2563EB", "#DB2777", "#7C3AED", "#EA580C", "#0891B2", "#16A34A"]
+    return palette[sum(ord(char) for char in owner_name) % len(palette)]
+
+
+def plain_caption(target: date, events: list[dict]) -> str:
+    weekday = "월화수목금토일"[target.weekday()]
+    return f"{target.month}월 {target.day}일 {weekday}요일 내일 일정 · {len(events)}개"
+
+
+def send_telegram_photo(token: str, chat_id: str, image: bytes, caption: str) -> None:
+    boundary = f"----calendar-card-{datetime.now().timestamp()}".replace(".", "")
+    fields = {
+        "chat_id": chat_id,
+        "caption": caption,
+    }
+    body = bytearray()
+    for name, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        body.extend(str(value).encode("utf-8"))
+        body.extend(b"\r\n")
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(b'Content-Disposition: form-data; name="photo"; filename="tomorrow.png"\r\n')
+    body.extend(b"Content-Type: image/png\r\n\r\n")
+    body.extend(image)
+    body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+    request = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendPhoto",
+        data=bytes(body),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            response.read()
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(error.read().decode("utf-8", errors="replace")) from error
 
 
 def send_telegram_message(token: str, chat_id: str, text: str) -> None:
