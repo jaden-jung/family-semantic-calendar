@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime, time, timedelta
+import html
 import json
 import urllib.error
 import urllib.request
@@ -134,7 +135,7 @@ def occurs_on(row: dict, target: date, timezone: ZoneInfo) -> bool:
 
 
 def summarize_events(settings: Settings, target: date, events: list[dict]) -> str:
-    fallback = build_fallback_summary(target, events)
+    fallback = build_html_summary(target, events)
     if not settings.notification_use_llm or not settings.openai_api_key or not events:
         return fallback
     try:
@@ -145,11 +146,11 @@ def summarize_events(settings: Settings, target: date, events: list[dict]) -> st
             messages=[
                 {
                     "role": "system",
-                    "content": "가족 일정 알림을 한국어로 짧고 정확하게 요약한다. 없는 내용은 만들지 않는다.",
+                    "content": "가족 일정 알림을 한국어로 짧고 정확하게 요약한다. Telegram HTML 형식으로 작성하고, 허용 태그는 <b>, <i>, <u>, <s>, <code>, <pre>만 사용한다. 없는 내용은 만들지 않는다.",
                 },
                 {
                     "role": "user",
-                    "content": f"날짜: {target.isoformat()}\n일정:\n{format_events_for_prompt(events)}\n\n텔레그램으로 보낼 요약을 작성해줘.",
+                    "content": f"날짜: {target.isoformat()}\n일정:\n{format_events_for_prompt(events)}\n\n텔레그램으로 보낼 HTML 요약을 작성해줘.",
                 },
             ],
         )
@@ -167,14 +168,47 @@ def build_fallback_summary(target: date, events: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def build_html_summary(target: date, events: list[dict]) -> str:
+    weekday = "월화수목금토일"[target.weekday()]
+    if not events:
+        return f"<b>{target.month}월 {target.day}일 {weekday}요일 내일 일정</b>\n\n등록된 일정이 없습니다."
+
+    lines = [
+        f"<b>{target.month}월 {target.day}일 {weekday}요일 내일 일정</b>",
+        "",
+        f"총 <b>{len(events)}개</b> 일정이 있습니다.",
+        "",
+    ]
+    for index, event in enumerate(events):
+        if index > 0:
+            lines.append("")
+        lines.extend(format_html_event(event))
+    warnings = event_warnings(events)
+    if warnings:
+        lines.extend(["", "<b>확인 필요</b>"])
+        lines.extend(f"- {html.escape(warning)}" for warning in warnings)
+    return "\n".join(lines)
+
+
+def format_html_event(event: dict) -> list[str]:
+    lines = [
+        f"<b>{html.escape(event_time_text(event))}</b>",
+        f"<b>{html.escape(event['title'])}</b>",
+        html.escape(f"{event['calendar_name']} · {event['owner_name']}"),
+    ]
+    if event["location"]:
+        lines.append(f"장소: {html.escape(event['location'])}")
+    if event["body"]:
+        lines.append(f"메모: {html.escape(event['body'])}")
+    return lines
+
+
 def format_events_for_prompt(events: list[dict]) -> str:
     return "\n".join(format_event_line(event) for event in events)
 
 
 def format_event_line(event: dict) -> str:
-    time_text = "종일" if event["all_day"] else event["starts_at"].strftime("%H:%M")
-    if event["ends_at"] and not event["all_day"]:
-        time_text += f"~{event['ends_at'].strftime('%H:%M')}"
+    time_text = event_time_text(event)
     parts = [f"- {time_text}", event["title"], f"({event['calendar_name']}, {event['owner_name']})"]
     if event["location"]:
         parts.append(f"장소: {event['location']}")
@@ -183,9 +217,28 @@ def format_event_line(event: dict) -> str:
     return " ".join(parts)
 
 
+def event_time_text(event: dict) -> str:
+    if event["all_day"]:
+        return "종일"
+    time_text = event["starts_at"].strftime("%H:%M")
+    if event["ends_at"] and event["ends_at"].time() != event["starts_at"].time():
+        time_text += f"~{event['ends_at'].strftime('%H:%M')}"
+    return time_text
+
+
+def event_warnings(events: list[dict]) -> list[str]:
+    warnings = []
+    for event in events:
+        text = f"{event['title']} {event['body']}"
+        registered_hour = event["starts_at"].hour
+        if registered_hour >= 22 and any(marker in text for marker in ("2시", "두시", "오후 2시")):
+            warnings.append(f"'{event['title']}' 일정은 등록 시간은 {event['starts_at'].strftime('%H:%M')}인데 제목/메모에는 2시가 있습니다.")
+    return warnings
+
+
 def send_telegram_message(token: str, chat_id: str, text: str) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+    payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
