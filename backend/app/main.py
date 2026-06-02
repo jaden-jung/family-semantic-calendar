@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import secrets
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from typing_extensions import Annotated
@@ -12,6 +14,7 @@ from typing_extensions import Annotated
 from app.config import Settings, get_settings
 from app.db import close_pool, get_conn, init_db, open_pool
 from app.embeddings import EmbeddingProvider, get_embedding_provider
+from app.notifications import notification_loop, send_tomorrow_notification, summarize_events, tomorrow_events
 from app.search_text import build_event_embedding_text, build_query_embedding_text
 from app.schemas import (
     AuthOut,
@@ -34,7 +37,13 @@ from app.schemas import (
 async def lifespan(app: FastAPI):
     open_pool()
     init_db()
+    settings = get_settings()
+    notification_task = None
+    if settings.notification_enabled:
+        notification_task = asyncio.create_task(notification_loop(settings))
     yield
+    if notification_task:
+        notification_task.cancel()
     close_pool()
 
 
@@ -555,3 +564,26 @@ def reembed_all_events(
             )
         conn.commit()
         return {"status": "ok", "updated": len(rows)}
+
+
+@app.post("/admin/notifications/tomorrow")
+def send_tomorrow_notification_now(
+    user: Annotated[dict, Depends(current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    return send_tomorrow_notification(settings, force=True)
+
+
+@app.get("/admin/notifications/tomorrow/preview")
+def preview_tomorrow_notification(
+    user: Annotated[dict, Depends(current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    timezone = ZoneInfo(settings.notification_timezone)
+    target = datetime.now(timezone).date() + timedelta(days=1)
+    events = tomorrow_events(target, timezone)
+    return {
+        "date": target.isoformat(),
+        "events": len(events),
+        "message": summarize_events(settings, target, events),
+    }

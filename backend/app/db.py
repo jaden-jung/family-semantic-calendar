@@ -123,4 +123,14 @@ def init_db() -> None:
             ON events USING hnsw (embedding vector_cosine_ops)
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notification_runs (
+                run_date date NOT NULL,
+                channel text NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (run_date, channel)
+            )
+            """
+        )
         conn.commit()

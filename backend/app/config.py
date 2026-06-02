@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     local_embedding_model: str = "intfloat/multilingual-e5-small"
     embedding_dimensions: int = 1536
+    telegram_bot_token: str | None = None
+    telegram_chat_ids: str = ""
+    notification_enabled: bool = False
+    notification_time: str = "23:00"
+    notification_timezone: str = "Asia/Seoul"
+    notification_use_llm: bool = True
+    openai_summary_model: str = "gpt-4o-mini"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

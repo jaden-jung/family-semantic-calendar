@@ -56,3 +56,20 @@ OPENAI_API_KEY=your_api_key
 ```
 
 The provider is isolated in `backend/app/embeddings.py`, so a local model such as `bge-m3` can replace OpenAI later without rewriting API routes.
+
+## Telegram Tomorrow Summary
+
+The backend can send a Telegram summary of tomorrow's events every day.
+Configure `backend/.env`:
+
+```powershell
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_IDS=your_chat_id
+NOTIFICATION_ENABLED=true
+NOTIFICATION_TIME=23:00
+NOTIFICATION_TIMEZONE=Asia/Seoul
+NOTIFICATION_USE_LLM=true
+OPENAI_SUMMARY_MODEL=gpt-4o-mini
+```
+
+Restart the backend after changing `.env`. Use `POST /admin/notifications/tomorrow` to send a test message immediately, or `GET /admin/notifications/tomorrow/preview` to preview the generated message.
