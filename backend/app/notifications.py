@@ -56,6 +56,49 @@ def send_tomorrow_notification(settings: Settings, target_date: date | None = No
     return {"status": "sent", "date": target.isoformat(), "events": len(events), "chats": len(chat_ids)}
 
 
+def run_tomorrow_telegram_automation(settings: Settings, target_date: date | None = None) -> dict:
+    timezone = ZoneInfo(settings.notification_timezone)
+    target = target_date or (datetime.now(timezone).date() + timedelta(days=1))
+    events = tomorrow_events(target, timezone)
+    message = build_table_summary(target, events)
+    chat_ids = parse_chat_ids(settings.telegram_chat_ids)
+
+    missing = []
+    if not settings.telegram_bot_token:
+        missing.append("TELEGRAM_BOT_TOKEN")
+    if not chat_ids:
+        missing.append("TELEGRAM_CHAT_IDS")
+    if missing:
+        return {
+            "status": "skipped",
+            "reason": "missing_config",
+            "date": target.isoformat(),
+            "events": len(events),
+            "message": message,
+            "missing": missing,
+        }
+
+    if notification_already_sent(target):
+        return {
+            "status": "skipped",
+            "reason": "already_sent",
+            "date": target.isoformat(),
+            "events": len(events),
+            "message": message,
+        }
+
+    for chat_id in chat_ids:
+        send_telegram_message(settings.telegram_bot_token, chat_id, message, settings.app_open_url)
+    mark_notification_sent(target)
+    return {
+        "status": "sent",
+        "date": target.isoformat(),
+        "events": len(events),
+        "message": message,
+        "chats": len(chat_ids),
+    }
+
+
 def tomorrow_events(target: date, timezone: ZoneInfo) -> list[dict]:
     start = datetime.combine(target, time.min, tzinfo=timezone)
     end = start + timedelta(days=1)
@@ -201,15 +244,11 @@ def build_table_summary(target: date, events: list[dict]) -> str:
         f"총 <b>{len(events)}개</b> 일정이 있습니다.",
         "",
         "<pre>",
-        "시간        일정              담당",
-        "────────────────────────────",
     ]
-    for event in events:
-        lines.append(table_row(event_time_text(event), event["title"], event["owner_name"]))
-        if event["location"]:
-            lines.append(table_note("장소", event["location"]))
-        if event["body"]:
-            lines.append(table_note("메모", event["body"]))
+    for index, event in enumerate(events):
+        if index > 0:
+            lines.append("")
+        lines.extend(table_event_block(event))
     lines.append("</pre>")
 
     warnings = event_warnings(events)
@@ -219,12 +258,17 @@ def build_table_summary(target: date, events: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def table_row(time_text: str, title: str, owner: str) -> str:
-    return html.escape(f"{clip_text(time_text, 10):<10} {clip_text(title, 14):<14} {clip_text(owner, 6)}")
-
-
-def table_note(label: str, value: str) -> str:
-    return html.escape(f"{'':<10} {label}: {clip_text(value, 22)}")
+def table_event_block(event: dict) -> list[str]:
+    meta = f"{event['calendar_name']} · {event['owner_name']}"
+    lines = [
+        html.escape(f"{clip_text(event_time_text(event), 8):<8} {clip_text(event['title'], 20)}"),
+        html.escape(f"{'':<8} {clip_text(meta, 22)}"),
+    ]
+    if event["location"]:
+        lines.append(html.escape(f"{'':<8} 장소: {clip_text(event['location'], 22)}"))
+    if event["body"]:
+        lines.append(html.escape(f"{'':<8} 메모: {clip_text(event['body'], 22)}"))
+    return lines
 
 
 def clip_text(value: str, limit: int) -> str:

@@ -15,7 +15,13 @@ from typing_extensions import Annotated
 from app.config import Settings, get_settings
 from app.db import close_pool, get_conn, init_db, open_pool
 from app.embeddings import EmbeddingProvider, get_embedding_provider
-from app.notifications import notification_loop, send_tomorrow_notification, summarize_events, tomorrow_events
+from app.notifications import (
+    notification_loop,
+    run_tomorrow_telegram_automation,
+    send_tomorrow_notification,
+    summarize_events,
+    tomorrow_events,
+)
 from app.search_text import build_event_embedding_text, build_query_embedding_text
 from app.schemas import (
     AuthOut,
@@ -608,6 +614,14 @@ def send_tomorrow_notification_now(
     settings: Annotated[Settings, Depends(get_settings)],
 ):
     return send_tomorrow_notification(settings, force=True)
+
+
+@app.post("/admin/notifications/tomorrow/automation")
+def run_tomorrow_notification_automation(
+    user: Annotated[dict, Depends(current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+):
+    return run_tomorrow_telegram_automation(settings)
 
 
 @app.get("/admin/notifications/tomorrow/preview")
