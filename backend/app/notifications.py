@@ -120,9 +120,14 @@ def tomorrow_events(target: date, timezone: ZoneInfo) -> list[dict]:
 
 
 def normalize_event(row: dict, target: date, timezone: ZoneInfo) -> dict:
-    starts_at = row["starts_at"].astimezone(timezone)
-    ends_at = row["ends_at"].astimezone(timezone) if row["ends_at"] else None
-    all_day = starts_at.time() == time.min and (ends_at is None or ends_at.time() >= time(23, 59))
+    if is_utc_all_day(row):
+        starts_at = datetime.combine(row["starts_at"].date(), time.min, tzinfo=timezone)
+        ends_at = datetime.combine(row["starts_at"].date(), time(23, 59), tzinfo=timezone)
+        all_day = True
+    else:
+        starts_at = row["starts_at"].astimezone(timezone)
+        ends_at = row["ends_at"].astimezone(timezone) if row["ends_at"] else None
+        all_day = starts_at.time() == time.min and (ends_at is None or ends_at.time() >= time(23, 59))
     return {
         "title": row["title"],
         "body": row["body"],
@@ -138,8 +143,12 @@ def normalize_event(row: dict, target: date, timezone: ZoneInfo) -> dict:
 
 
 def occurs_on(row: dict, target: date, timezone: ZoneInfo) -> bool:
-    starts_at = row["starts_at"].astimezone(timezone)
-    ends_at = row["ends_at"].astimezone(timezone) if row["ends_at"] else None
+    if is_utc_all_day(row):
+        starts_at = datetime.combine(row["starts_at"].date(), time.min, tzinfo=timezone)
+        ends_at = datetime.combine(row["starts_at"].date(), time(23, 59), tzinfo=timezone)
+    else:
+        starts_at = row["starts_at"].astimezone(timezone)
+        ends_at = row["ends_at"].astimezone(timezone) if row["ends_at"] else None
     start_date = starts_at.date()
     end_date = ends_at.date() if ends_at else None
     rule = row["recurrence_rule"]
@@ -175,6 +184,20 @@ def occurs_on(row: dict, target: date, timezone: ZoneInfo) -> bool:
             return False
         return target.month == start_date.month and target.day == start_date.day
     return False
+
+
+def is_utc_all_day(row: dict) -> bool:
+    starts_at = row["starts_at"]
+    ends_at = row["ends_at"]
+    return (
+        ends_at is not None
+        and starts_at.hour == 0
+        and starts_at.minute == 0
+        and starts_at.second == 0
+        and starts_at.date() == ends_at.date()
+        and ends_at.hour == 23
+        and ends_at.minute == 59
+    )
 
 
 def summarize_events(settings: Settings, target: date, events: list[dict]) -> str:
@@ -260,8 +283,9 @@ def build_table_summary(target: date, events: list[dict]) -> str:
 
 def table_event_block(event: dict) -> list[str]:
     meta = f"{event['calendar_name']} · {event['owner_name']}"
+    first_line = f"{clip_text(event_time_text(event), 12):<12} {clip_text(event['title'], 18)}"
     lines = [
-        html.escape(f"{clip_text(event_time_text(event), 8):<8} {clip_text(event['title'], 20)}"),
+        html.escape(pad_pre_width(first_line)),
         html.escape(f"{'':<8} {clip_text(meta, 22)}"),
     ]
     if event["location"]:
@@ -269,6 +293,10 @@ def table_event_block(event: dict) -> list[str]:
     if event["body"]:
         lines.append(html.escape(f"{'':<8} 메모: {clip_text(event['body'], 22)}"))
     return lines
+
+
+def pad_pre_width(value: str, min_chars: int = 38) -> str:
+    return value + ("\u2800" * max(0, min_chars - len(value)))
 
 
 def clip_text(value: str, limit: int) -> str:
