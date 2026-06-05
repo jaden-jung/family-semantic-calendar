@@ -1567,7 +1567,8 @@ class MainActivity : Activity() {
         val dialog = builder.create()
 
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            saveButton.setOnClickListener {
                 val title = titleInput.text.toString().trim()
                 if (title.isBlank()) {
                     toast("제목을 입력해 주세요.")
@@ -1591,6 +1592,7 @@ class MainActivity : Activity() {
                         lunarCheck.isChecked,
                     )
                 } else null
+                saveButton.isEnabled = false
                 background(
                     work = {
                         if (event == null) {
@@ -1608,6 +1610,9 @@ class MainActivity : Activity() {
                         listHidden = false
                         clearVisibleEventCache()
                         reloadCalendar()
+                    },
+                    failed = {
+                        saveButton.isEnabled = true
                     },
                 )
             }
