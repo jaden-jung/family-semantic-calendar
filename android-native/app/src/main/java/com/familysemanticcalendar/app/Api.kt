@@ -348,7 +348,7 @@ object CalendarApi {
         val connection = (URL("$API_BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 10000
-            readTimeout = 60000
+            readTimeout = 15000
             setRequestProperty("Content-Type", "application/json")
             accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
             if (body != null) {

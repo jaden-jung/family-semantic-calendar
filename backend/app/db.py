@@ -125,6 +125,24 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS embedding_jobs (
+                event_id uuid PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+                status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'failed')),
+                attempts integer NOT NULL DEFAULT 0,
+                last_error text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS embedding_jobs_status_updated_idx
+            ON embedding_jobs (status, updated_at)
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS notification_runs (
                 run_date date NOT NULL,
                 channel text NOT NULL,

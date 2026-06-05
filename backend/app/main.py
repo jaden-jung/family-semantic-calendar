@@ -46,9 +46,11 @@ async def lifespan(app: FastAPI):
     init_db()
     settings = get_settings()
     notification_task = None
+    embedding_task = asyncio.create_task(embedding_job_loop(settings))
     if settings.notification_enabled:
         notification_task = asyncio.create_task(notification_loop(settings))
     yield
+    embedding_task.cancel()
     if notification_task:
         notification_task.cancel()
     close_pool()
@@ -136,6 +138,110 @@ def event_embedding_text_from_payload(payload: EventCreate | EventUpdate) -> str
         ends_at=payload.ends_at,
         recurrence_rule=payload.recurrence_rule,
     )
+
+
+def queue_embedding_job(conn, event_id) -> None:
+    conn.execute(
+        """
+        INSERT INTO embedding_jobs (event_id, status, attempts, last_error, updated_at)
+        VALUES (%s, 'pending', 0, NULL, now())
+        ON CONFLICT (event_id) DO UPDATE
+        SET status = 'pending',
+            attempts = 0,
+            last_error = NULL,
+            updated_at = now()
+        """,
+        (event_id,),
+    )
+
+
+async def embedding_job_loop(settings: Settings) -> None:
+    provider = get_embedding_provider(settings)
+    while True:
+        try:
+            processed = await asyncio.to_thread(process_one_embedding_job, provider)
+            if not processed:
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(f"embedding job loop failed: {error}")
+            await asyncio.sleep(5)
+
+
+def process_one_embedding_job(provider: EmbeddingProvider) -> bool:
+    with get_conn() as conn:
+        job = conn.execute(
+            """
+            SELECT event_id
+            FROM embedding_jobs
+            WHERE status IN ('pending', 'failed')
+              AND attempts < 3
+            ORDER BY updated_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """
+        ).fetchone()
+        if not job:
+            return False
+        conn.execute(
+            """
+            UPDATE embedding_jobs
+            SET status = 'processing',
+                attempts = attempts + 1,
+                updated_at = now()
+            WHERE event_id = %s
+            """,
+            (job["event_id"],),
+        )
+        conn.commit()
+
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, title, body, location, starts_at, ends_at, recurrence_rule, source, raw_text
+                FROM events
+                WHERE id = %s
+                """,
+                (job["event_id"],),
+            ).fetchone()
+        if not row:
+            return True
+        text = build_event_embedding_text(
+            title=row["title"],
+            body=row["body"],
+            location=row["location"],
+            starts_at=row["starts_at"],
+            ends_at=row["ends_at"],
+            recurrence_rule=row["recurrence_rule"],
+            source=row["source"],
+            raw_text=row["raw_text"],
+        )
+        embedding = vector_literal(provider.embed(text))
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE events SET embedding = %s::vector, updated_at = now() WHERE id = %s",
+                (embedding, job["event_id"]),
+            )
+            conn.execute("DELETE FROM embedding_jobs WHERE event_id = %s", (job["event_id"],))
+            conn.commit()
+        return True
+    except Exception as error:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE embedding_jobs
+                SET status = 'failed',
+                    last_error = %s,
+                    updated_at = now()
+                WHERE event_id = %s
+                """,
+                (str(error), job["event_id"]),
+            )
+            conn.commit()
+        print(f"embedding job failed for {job['event_id']}: {error}")
+        return True
 
 
 def assert_member(calendar_id, user_id) -> None:
@@ -408,21 +514,18 @@ def list_calendar_members(calendar_id: str, user: Annotated[dict, Depends(curren
 @app.post("/events", response_model=EventOut)
 def create_event(
     payload: EventCreate,
-    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
     user: Annotated[dict, Depends(current_user)],
 ):
     assert_member(payload.calendar_id, user["id"])
     if payload.created_by is not None:
         assert_member(payload.calendar_id, payload.created_by)
-    searchable_text = event_embedding_text_from_payload(payload)
-    embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
         row = conn.execute(
             """
             INSERT INTO events (
-                calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, embedding
+                calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::vector)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
             """,
             (
@@ -434,9 +537,9 @@ def create_event(
                 payload.starts_at,
                 payload.ends_at,
                 json.dumps(payload.recurrence_rule) if payload.recurrence_rule else None,
-                embedding,
             ),
         ).fetchone()
+        queue_embedding_job(conn, row["id"])
         conn.commit()
         return row
 
@@ -445,7 +548,6 @@ def create_event(
 def update_event(
     event_id: str,
     payload: EventUpdate,
-    provider: Annotated[EmbeddingProvider, Depends(embedding_provider)],
     user: Annotated[dict, Depends(current_user)],
 ):
     with get_conn() as conn:
@@ -459,8 +561,6 @@ def update_event(
     if payload.created_by is not None:
         assert_member(existing["calendar_id"], payload.created_by)
 
-    searchable_text = event_embedding_text_from_payload(payload)
-    embedding = vector_literal(provider.embed(searchable_text))
     with get_conn() as conn:
         row = conn.execute(
             """
@@ -472,7 +572,7 @@ def update_event(
                 starts_at = %s,
                 ends_at = %s,
                 recurrence_rule = %s::jsonb,
-                embedding = %s::vector,
+                embedding = NULL,
                 updated_at = now()
             WHERE id = %s
             RETURNING id, calendar_id, created_by, title, body, location, starts_at, ends_at, recurrence_rule, source
@@ -485,10 +585,10 @@ def update_event(
                 payload.starts_at,
                 payload.ends_at,
                 json.dumps(payload.recurrence_rule) if payload.recurrence_rule else None,
-                embedding,
                 event_id,
             ),
         ).fetchone()
+        queue_embedding_job(conn, row["id"])
         conn.commit()
         return row
 
@@ -555,6 +655,7 @@ def search_events(
                    embedding <=> %s::vector AS distance
             FROM events
             WHERE calendar_id = ANY(%s::uuid[])
+              AND embedding IS NOT NULL
               AND (embedding <=> %s::vector) <= %s
             ORDER BY embedding <=> %s::vector
             LIMIT %s
@@ -568,6 +669,7 @@ def search_events(
                        embedding <=> %s::vector AS distance
                 FROM events
                 WHERE calendar_id = ANY(%s::uuid[])
+                  AND embedding IS NOT NULL
                 ORDER BY embedding <=> %s::vector
                 LIMIT 1
                 """,
@@ -604,6 +706,7 @@ def reembed_all_events(
                 "UPDATE events SET embedding = %s::vector, updated_at = now() WHERE id = %s",
                 (vector_literal(provider.embed(text)), row["id"]),
             )
+        conn.execute("DELETE FROM embedding_jobs")
         conn.commit()
         return {"status": "ok", "updated": len(rows)}
 
